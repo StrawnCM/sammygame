@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Canyon Math Shooter</title>
+  <style>
+    body { margin:0; padding:0; overflow:hidden; background:#000; font-family:'Courier New', monospace; cursor:crosshair; }
+    #gameCanvas { display:block; background:#000; }
+
+    #ui {
+      position:absolute; top:10px; left:10px; color:#00ff00; font-size:18px; text-shadow:0 0 10px #00ff00; font-weight:bold;
+      background:rgba(0,0,0,0.5); border:2px solid #00ff00; padding:8px 10px; border-radius:6px;
+      user-select:none;
+    }
+    #ui .row { margin:3px 0; }
+    #ui label { font-weight:bold; margin-right:6px; }
+    #speedSlider { vertical-align:middle; }
+    #speedLabel { display:inline-block; min-width:42px; text-align:right; margin-left:6px; }
+
+    #mathPrompt {
+      position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,0.9); border:3px solid #00ff00; padding:20px; color:#00ff00; text-align:center; display:none;
+      box-shadow:0 0 20px #00ff00; max-width:90%;
+    }
+    #mathPrompt h2 { margin:0 0 12px 0; font-size:22px; }
+    #mathPrompt .q { font-size:36px; margin:16px 0 12px; }
+    #mathPrompt input {
+      background:#000; border:2px solid #00ff00; color:#00ff00; font-size:24px; padding:10px; width:120px; text-align:center;
+      font-family:'Courier New', monospace;
+    }
+    #mathPrompt button {
+      background:#00ff00; color:#000; border:none; padding:10px 20px; font-size:18px; margin-left:10px; cursor:pointer;
+      font-family:'Courier New', monospace; font-weight:bold;
+    }
+    #mathPrompt button:hover { background:#00cc00; }
+
+    .overlay {
+      position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
+      background:rgba(0,0,0,0.9); padding:28px; text-align:center; display:none; min-width:300px;
+    }
+    #gameOver { border:3px solid #ff0000; color:#ff0000; box-shadow:0 0 30px #ff0000; }
+    #gameOver h2 { font-size:36px; margin:0 0 14px 0; }
+    #gameOver button { background:#ff0000; color:#fff; border:none; padding:14px 26px; font-size:18px; cursor:pointer; font-weight:bold; }
+
+    #youWin { border:3px solid #00ff66; color:#00ff66; box-shadow:0 0 30px #00ff66; }
+    #youWin h2 { font-size:36px; margin:0 0 14px 0; }
+    #youWin button { background:#00ff66; color:#000; border:none; padding:14px 26px; font-size:18px; cursor:pointer; font-weight:bold; }
+
+    #levelBanner {
+      position:absolute; top:50px; left:50%; transform:translateX(-50%);
+      padding:10px 16px; border:2px solid #00ffcc; color:#00ffcc; background:rgba(0,0,0,0.75);
+      font-weight:bold; display:none; text-shadow:0 0 10px #00ffcc;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="ui">
+    <div class="row">Score: <span id="score">0</span></div>
+    <div class="row">Bullets: <span id="bullets">10</span></div>
+    <div class="row">Health: <span id="health">100</span></div>
+    <div class="row">Level: <span id="level">1</span>/4</div>
+    <div class="row">Progress: <span id="progress">0</span>/<span id="levelGoal">8</span></div>
+    <div class="row">
+      <label for="speedSlider">Speed</label>
+      <!-- Allow slower-than-before starts -->
+      <input type="range" id="speedSlider" min="0.25" max="2" step="0.05" value="0.50">
+      <span id="speedLabel">0.5x</span>
+    </div>
+  </div>
+
+  <div id="mathPrompt">
+    <h2 id="promptTitle">RELOAD — Level 1: Addition</h2>
+    <div id="mathQuestion" class="q"></div>
+    <input type="number" id="mathAnswer" inputmode="numeric" autocomplete="off" />
+    <button id="answerBtn">Fire!</button>
+  </div>
+
+  <div id="gameOver" class="overlay">
+    <h2>GAME OVER</h2>
+    <div>Final Score: <span id="finalScore">0</span></div>
+    <button id="restartBtn1">Play Again</button>
+  </div>
+
+  <div id="youWin" class="overlay">
+    <h2>YOU BEAT THE GAME!</h2>
+    <div>Final Score: <span id="finalWinScore">0</span></div>
+    <button id="restartBtn2">Play Again</button>
+  </div>
+
+  <div id="levelBanner"></div>
+
+  <script>
+    // ===== Canvas setup =====
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      vanishingPoint.x = canvas.width / 2;
+      vanishingPoint.y = canvas.height / 2;
+      initDecor();
+    }
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const vanishingPoint = { x: canvas.width / 2, y: canvas.height / 2 };
+
+    // ===== UI elements =====
+    const scoreEl = document.getElementById('score');
+    const bulletsEl = document.getElementById('bullets');
+    const healthEl = document.getElementById('health');
+    const levelEl = document.getElementById('level');
+    const progressEl = document.getElementById('progress');
+    const levelGoalEl = document.getElementById('levelGoal');
+    const speedSlider = document.getElementById('speedSlider');
+    const speedLabel = document.getElementById('speedLabel');
+    const mathPrompt = document.getElementById('mathPrompt');
+    const promptTitle = document.getElementById('promptTitle');
+    const mathQuestionEl = document.getElementById('mathQuestion');
+    const mathAnswerEl = document.getElementById('mathAnswer');
+    const answerBtn = document.getElementById('answerBtn');
+    const gameOverEl = document.getElementById('gameOver');
+    const finalScoreEl = document.getElementById('finalScore');
+    const youWinEl = document.getElementById('youWin');
+    const finalWinScoreEl = document.getElementById('finalWinScore');
+    const restartBtn1 = document.getElementById('restartBtn1');
+    const restartBtn2 = document.getElementById('restartBtn2');
+    const levelBanner = document.getElementById('levelBanner');
+
+    // ===== Game state =====
+    let score = 0;
+    const bulletsPerReload = 10;
+    let bullets = bulletsPerReload;
+    let health = 100;
+    let mouseX = canvas.width / 2;
+    let mouseY = canvas.height / 2;
+    let targets = [];
+    let explosions = [];
+    let currentMathProblem = null;
+    let isReloading = false;
+    let gameRunning = true;
+
+    // Levels & progression
+    let level = 1;
+    const maxLevel = 4;
+    const levelGoal = 8; // correct answers needed per level
+    let correctThisLevel = 0;
+
+    // Speed control (sync to slider at startup)
+    let speedMultiplier = 1;
+
+    // Frame timer for framerate-independent motion
+    let lastTime = 0; // ms timestamp from rAF
+
+    // ===== Helpers =====
+    function randInt(min, max) { // inclusive
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+    function randRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    // Per-level math label + symbol
+    const levelOps = {
+      1: { sym: '+', name: 'Addition' },
+      2: { sym: '−', name: 'Subtraction' },
+      3: { sym: '×', name: 'Multiplication' },
+      4: { sym: '÷', name: 'Division' }
+    };
+
+    // Per-level pacing tuned to start slower and ramp up
+    // spawnPerSec: expected spawns each second (Poisson process)
+    const levelParams = {
+      1: { speedRange: [0.20, 0.35], spawnPerSec: 0.60, zStart: 360 },
+      2: { speedRange: [0.25, 0.40], spawnPerSec: 0.80, zStart: 340 },
+      3: { speedRange: [0.30, 0.50], spawnPerSec: 1.00, zStart: 320 },
+      4: { speedRange: [0.35, 0.60], spawnPerSec: 1.20, zStart: 300 }
+    };
+
+    function showBanner(text, ms=1200) {
+      levelBanner.textContent = text;
+      levelBanner.style.display = 'block';
+      setTimeout(() => levelBanner.style.display = 'none', ms);
+    }
+
+    function syncSpeedFromSlider() {
+      speedMultiplier = parseFloat(speedSlider.value);
+      speedLabel.textContent = speedMultiplier.toFixed(1) + 'x';
+    }
+
+    function updateUI() {
+      scoreEl.textContent = score;
+      bulletsEl.textContent = bullets;
+      healthEl.textContent = Math.max(0, health);
+      levelEl.textContent = level;
+      progressEl.textContent = correctThisLevel;
+      levelGoalEl.textContent = levelGoal;
+
+      if (health <= 0 && gameRunning) {
+        gameOver();
+      }
+    }
+
+    function opForLevel(lvl) { return levelOps[lvl].sym; }
+
+    function generateMathProblemForLevel(lvl) {
+      // Easier facts:
+      // - Addition/Subtraction: two numbers each 0..20, no negative results
+      // - Multiplication: 1..12 × 1..12
+      // - Division: (1..12 * 1..12) ÷ (1..12) → whole-number quotient 1..12
+      let a, b, op, answer;
+
+      switch (lvl) {
+        case 1: // Addition
+          a = randInt(0, 20); b = randInt(0, 20); op = '+'; answer = a + b; break;
+        case 2: // Subtraction (no negatives)
+          a = randInt(0, 20); b = randInt(0, 20); if (a < b) [a, b] = [b, a]; op = '−'; answer = a - b; break;
+        case 3: // Multiplication (12×12 table)
+          a = randInt(1, 12); b = randInt(1, 12); op = '×'; answer = a * b; break;
+        case 4: // Division (whole-number)
+          const q = randInt(1, 12), d = randInt(1, 12);
+          a = q * d; b = d; op = '÷'; answer = q; break;
+        default:
+          a = randInt(0, 20); b = randInt(0, 20); op = '+'; answer = a + b;
+      }
+      return { a, b, op, answer };
+    }
+
+    function showMathPrompt() {
+      if (isReloading) return;
+      isReloading = true;
+      currentMathProblem = generateMathProblemForLevel(level);
+      promptTitle.textContent = `RELOAD — Level ${level}: ${levelOps[level].name}`;
+      mathQuestionEl.innerHTML = `${currentMathProblem.a} ${currentMathProblem.op} ${currentMathProblem.b} = ?`;
+      mathPrompt.style.display = 'block';
+      mathAnswerEl.value = '';
+      mathAnswerEl.focus();
+    }
+
+    function checkAnswer() {
+      const val = mathAnswerEl.value.trim();
+      if (val === '') return;
+      const answer = Number(val);
+      if (Number.isNaN(answer)) return;
+
+      if (answer === currentMathProblem.answer) {
+        bullets = bulletsPerReload;
+        correctThisLevel++;
+        updateUI();
+
+        // Level progression
+        if (correctThisLevel >= levelGoal) {
+          if (level < maxLevel) {
+            level++;
+            correctThisLevel = 0;
+            showBanner(`Level ${level}: ${levelOps[level].name}`);
+          } else {
+            winGame();
+          }
+        }
+
+        mathPrompt.style.display = 'none';
+        isReloading = false;
+      } else {
+        // brief visual miss feedback
+        mathAnswerEl.style.borderColor = '#ff0000';
+        setTimeout(() => {
+          mathAnswerEl.style.borderColor = '#00ff00';
+          mathAnswerEl.value = '';
+          mathAnswerEl.focus();
+        }, 350);
+      }
+    }
+
+    function gameOver() {
+      gameRunning = false;
+      finalScoreEl.textContent = score;
+      gameOverEl.style.display = 'block';
+    }
+
+    function winGame() {
+      gameRunning = false;
+      finalWinScoreEl.textContent = score;
+      youWinEl.style.display = 'block';
+    }
+
+    function restartGame() {
+      score = 0;
+      bullets = bulletsPerReload;
+      health = 100;
+      targets = [];
+      explosions = [];
+      gameRunning = true;
+      isReloading = false;
+      level = 1;
+      correctThisLevel = 0;
+      lastTime = 0;
+      gameOverEl.style.display = 'none';
+      youWinEl.style.display = 'none';
+      mathPrompt.style.display = 'none';
+      syncSpeedFromSlider();
+      updateUI();
+      showBanner(`Level ${level}: ${levelOps[level].name}`);
+    }
+
+    // ===== Entities =====
+    class Target {
+      constructor(params) {
+        this.x = (Math.random() - 0.5) * 200;
+        this.y = (Math.random() - 0.5) * 100;
+        this.z = params.zStart;
+        this.baseSpeed = randRange(params.speedRange[0], params.speedRange[1]); // per-frame at 60fps baseline
+        this.size = 20;
+        this.hit = false;
+      }
+
+      update(dt) {
+        if (!this.hit) {
+          // dt is normalized such that dt=1 at 60fps
+          this.z -= this.baseSpeed * speedMultiplier * dt;
+
+          if (this.z <= 1) {
+            health -= 10;
+            updateUI();
+            return false;
+          }
+        }
+        return true;
+      }
+
+      getScreenCoords() {
+        const scale = 200 / Math.max(1, this.z);
+        const screenX = vanishingPoint.x + (this.x * scale);
+        const screenY = vanishingPoint.y + (this.y * scale);
+        const screenSize = this.size * scale;
+        return { x: screenX, y: screenY, size: screenSize };
+      }
+
+      draw() {
+        const c = this.getScreenCoords();
+        ctx.save();
+
+        const size = c.size;
+        ctx.shadowColor = '#00ff00';
+        ctx.shadowBlur = size * 0.5;
+
+        // Skull cranium
+        ctx.fillStyle = '#f0f0f0';
+        ctx.beginPath();
+        ctx.arc(c.x, c.y - size * 0.2, size * 0.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Jaw
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y + size * 0.3, size * 0.6, size * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Eyes
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(c.x - size * 0.25, c.y - size * 0.2, size * 0.2, size * 0.25, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(c.x + size * 0.25, c.y - size * 0.2, size * 0.2, size * 0.25, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Eye glow
+        ctx.fillStyle = '#ff0000';
+        ctx.shadowColor = '#ff0000';
+        ctx.shadowBlur = 10;
+        ctx.beginPath(); ctx.arc(c.x - size * 0.25, c.y - size * 0.2, size * 0.05, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(c.x + size * 0.25, c.y - size * 0.2, size * 0.05, 0, Math.PI * 2); ctx.fill();
+
+        // Nose
+        ctx.fillStyle = '#000'; ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.moveTo(c.x, c.y);
+        ctx.lineTo(c.x - size * 0.1, c.y + size * 0.15);
+        ctx.lineTo(c.x + size * 0.1, c.y + size * 0.15);
+        ctx.closePath(); ctx.fill();
+
+        // Teeth
+        ctx.fillStyle = '#f0f0f0';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        const teethCount = 6;
+        const teethWidth = (size * 0.6) / teethCount;
+        for (let i = 0; i < teethCount; i++) {
+          const x = c.x - size * 0.3 + i * teethWidth + teethWidth / 2;
+          ctx.fillRect(x - teethWidth * 0.3, c.y + size * 0.35, teethWidth * 0.6, size * 0.15);
+          ctx.strokeRect(x - teethWidth * 0.3, c.y + size * 0.35, teethWidth * 0.6, size * 0.15);
+        }
+
+        // Crack
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(c.x - size * 0.1, c.y - size * 0.6);
+        ctx.lineTo(c.x - size * 0.05, c.y - size * 0.3);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
+      checkHit(x, y) {
+        const c = this.getScreenCoords();
+        const dist = Math.hypot(x - c.x, y - c.y);
+        return dist < c.size;
+      }
+    }
+
+    class Explosion {
+      constructor(x, y) {
+        this.x = x; this.y = y;
+        this.particles = [];
+        for (let i = 0; i < 15; i++) {
+          this.particles.push({
+            x, y,
+            vx: (Math.random() - 0.5) * 8,
+            vy: (Math.random() - 0.5) * 8,
+            life: 1
+          });
+        }
+      }
+      update(dt) {
+        this.particles = this.particles.filter(p => {
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vy += 0.2 * dt;    // gravity-ish
+          p.life -= 0.03 * dt; // fade rate
+          return p.life > 0;
+        });
+        return this.particles.length > 0;
+      }
+      draw() {
+        this.particles.forEach(p => {
+          ctx.fillStyle = `rgba(0, 255, ${Math.floor(p.life * 100)}, ${p.life})`;
+          ctx.shadowColor = '#00ff00'; ctx.shadowBlur = 10;
+          ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+        });
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    // ===== Background =====
+    const tombstones = [];
+    function initDecor() {
+      tombstones.length = 0;
+      for (let i = 0; i < 60; i++) {
+        const x = Math.random() * canvas.width;
+        const y = vanishingPoint.y + Math.random() * (canvas.height - vanishingPoint.y);
+        const size = 2 + (y - vanishingPoint.y) / (canvas.height - vanishingPoint.y) * 4;
+        tombstones.push({ x, y, size });
+      }
+    }
+
+    function drawCanyon() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, '#000000');
+      gradient.addColorStop(0.5, '#001a00');
+      gradient.addColorStop(1, '#003300');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const fogGradient = ctx.createRadialGradient(vanishingPoint.x, vanishingPoint.y, 0, vanishingPoint.x, vanishingPoint.y, canvas.width);
+      fogGradient.addColorStop(0, 'rgba(0, 255, 0, 0.1)');
+      fogGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = fogGradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = '#004400';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#00ff00';
+      ctx.shadowBlur = 5;
+
+      // Perspective lines from edges
+      for (let i = 0; i <= 10; i++) {
+        const lx = (i / 10) * vanishingPoint.x;
+        ctx.beginPath(); ctx.moveTo(lx, canvas.height); ctx.lineTo(vanishingPoint.x, vanishingPoint.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(lx, 0);             ctx.lineTo(vanishingPoint.x, vanishingPoint.y); ctx.stroke();
+
+        const rx = vanishingPoint.x + (i / 10) * (canvas.width - vanishingPoint.x);
+        ctx.beginPath(); ctx.moveTo(rx, canvas.height); ctx.lineTo(vanishingPoint.x, vanishingPoint.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(rx, 0);             ctx.lineTo(vanishingPoint.x, vanishingPoint.y); ctx.stroke();
+      }
+
+      // Depth rectangles
+      for (let i = 1; i <= 8; i++) {
+        const f = i / 8;
+        const left = vanishingPoint.x - (vanishingPoint.x * f);
+        const right = vanishingPoint.x + ((canvas.width - vanishingPoint.x) * f);
+        const top = vanishingPoint.y - (vanishingPoint.y * f);
+        const bottom = vanishingPoint.y + ((canvas.height - vanishingPoint.y) * f);
+        ctx.beginPath();
+        ctx.moveTo(left, top); ctx.lineTo(right, top); ctx.lineTo(right, bottom); ctx.lineTo(left, bottom);
+        ctx.closePath(); ctx.stroke();
+      }
+
+      ctx.shadowBlur = 0;
+
+      // Foreground tombstones (static)
+      ctx.fillStyle = '#002200';
+      tombstones.forEach(t => {
+        ctx.fillRect(t.x - t.size / 2, t.y - t.size, t.size, t.size);
+        ctx.beginPath(); ctx.arc(t.x, t.y - t.size, t.size / 2, Math.PI, 0); ctx.fill();
+      });
+    }
+
+    // ===== Loop =====
+    function gameLoop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const deltaMs = timestamp - lastTime;
+      // dt normalized so dt=1 at 60fps; deltaSec is real seconds
+      const dt = deltaMs / (1000 / 60);
+      const deltaSec = deltaMs / 1000;
+      lastTime = timestamp;
+
+      drawCanyon();
+
+      if (gameRunning) {
+        // Stable-rate spawning using a Poisson process
+        const lp = levelParams[level];
+        const reloadFactor = isReloading ? 0.35 : 1.0; // slow spawns while math prompt is up
+        const lambda = lp.spawnPerSec * reloadFactor;
+        const spawnProb = 1 - Math.exp(-lambda * deltaSec);
+        if (Math.random() < spawnProb) {
+          targets.push(new Target(lp));
+        }
+
+        // Draw far-to-near (bigger z first)
+        targets.sort((a, b) => b.z - a.z);
+
+        targets = targets.filter(t => {
+          const alive = t.update(dt);
+          if (alive) t.draw();
+          return alive;
+        });
+
+        explosions = explosions.filter(ex => {
+          const alive = ex.update(dt);
+          if (alive) ex.draw();
+          return alive;
+        });
+      }
+
+      drawCrosshair();
+      requestAnimationFrame(gameLoop);
+    }
+
+    function drawCrosshair() {
+      ctx.strokeStyle = '#00ff00';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#00ff00';
+      ctx.shadowBlur = 5;
+      ctx.beginPath();
+      ctx.arc(mouseX, mouseY, 15, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(mouseX - 20, mouseY); ctx.lineTo(mouseX - 10, mouseY);
+      ctx.moveTo(mouseX + 10, mouseY); ctx.lineTo(mouseX + 20, mouseY);
+      ctx.moveTo(mouseX, mouseY - 20); ctx.lineTo(mouseX, mouseY - 10);
+      ctx.moveTo(mouseX, mouseY + 10); ctx.lineTo(mouseX, mouseY + 20);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    // ===== Events =====
+    canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
+
+    canvas.addEventListener('click', (e) => {
+      if (!gameRunning) return;
+      if (bullets > 0 && !isReloading) {
+        bullets--;
+        updateUI();
+
+        // Check near-to-far for hits
+        const sorted = [...targets].sort((a, b) => a.z - b.z);
+        for (let t of sorted) {
+          if (t.checkHit(e.clientX, e.clientY)) {
+            score += Math.floor(100 / t.z * 10);
+            explosions.push(new Explosion(e.clientX, e.clientY));
+            targets.splice(targets.indexOf(t), 1);
+            updateUI();
+            break;
+          }
+        }
+
+        if (bullets === 0) {
+          showMathPrompt();
+        }
+      }
+    });
+
+    mathAnswerEl.addEventListener('keypress', (e) => { if (e.key === 'Enter') checkAnswer(); });
+    answerBtn.addEventListener('click', checkAnswer);
+
+    restartBtn1.addEventListener('click', restartGame);
+    restartBtn2.addEventListener('click', restartGame);
+
+    speedSlider.addEventListener('input', () => {
+      syncSpeedFromSlider();
+    });
+
+    window.addEventListener('resize', resize);
+
+    // ===== Start =====
+    initDecor();
+    syncSpeedFromSlider(); // <- ensures we actually start at the slider's (slow) value
+    updateUI();
+    requestAnimationFrame(gameLoop);
+    showBanner(`Level ${level}: ${levelOps[level].name}`);
+  </script>
+</body>
+</html>
