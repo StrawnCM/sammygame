@@ -96,7 +96,7 @@
     <div class="row">Bullets: <span id="bullets">10</span></div>
     <div class="row">Health: <span id="health">100</span></div>
     <div class="row">Level: <span id="level">1</span>/4</div>
-    <div class="row">Progress: <span id="progress">0</span>/<span id="levelGoal">8</span></div>
+    <div class="row">Progress: <span id="progress">0</span>/<span id="levelGoal">0</span></div>
     <div class="row">
       <label for="speedSlider">Speed</label>
       <input type="range" id="speedSlider" min="0.25" max="2" step="0.05" value="0.50">
@@ -193,7 +193,7 @@
     // Levels & progression
     let level = 1;
     const maxLevel = 4;
-    let levelGoal = 8; // correct answers needed per level
+    let levelGoal = 0; // correct answers needed per level (set in configureLevel)
     let correctThisLevel = 0;
 
     // Speed control (sync to slider at startup)
@@ -218,6 +218,102 @@
       3: { sym: '×', name: 'Multiplication' },
       4: { sym: '÷', name: 'Division' }
     };
+
+    // Hardcoded question sets for each level
+    const levelQuestions = {
+      1: [
+        { a:6, b:5, op:'+', answer:11 },
+        { a:7, b:4, op:'+', answer:11 },
+        { a:7, b:5, op:'+', answer:12 },
+        { a:7, b:6, op:'+', answer:13 },
+        { a:8, b:3, op:'+', answer:11 },
+        { a:8, b:4, op:'+', answer:12 },
+        { a:8, b:5, op:'+', answer:13 },
+        { a:8, b:6, op:'+', answer:14 },
+        { a:8, b:7, op:'+', answer:15 },
+        { a:9, b:3, op:'+', answer:12 },
+        { a:9, b:4, op:'+', answer:13 },
+        { a:9, b:5, op:'+', answer:14 },
+        { a:9, b:6, op:'+', answer:15 },
+        { a:9, b:7, op:'+', answer:16 },
+        { a:9, b:8, op:'+', answer:17 }
+      ],
+      2: [
+        { a:11, b:2, op:'−', answer:9 },
+        { a:11, b:3, op:'−', answer:8 },
+        { a:11, b:4, op:'−', answer:7 },
+        { a:11, b:5, op:'−', answer:6 },
+        { a:11, b:6, op:'−', answer:5 },
+        { a:11, b:7, op:'−', answer:4 },
+        { a:11, b:8, op:'−', answer:3 },
+        { a:11, b:9, op:'−', answer:2 },
+        { a:12, b:3, op:'−', answer:9 },
+        { a:12, b:4, op:'−', answer:8 },
+        { a:12, b:5, op:'−', answer:7 },
+        { a:12, b:7, op:'−', answer:5 },
+        { a:12, b:8, op:'−', answer:4 },
+        { a:12, b:9, op:'−', answer:3 },
+        { a:13, b:4, op:'−', answer:9 },
+        { a:13, b:5, op:'−', answer:8 },
+        { a:13, b:6, op:'−', answer:7 },
+        { a:13, b:7, op:'−', answer:6 },
+        { a:13, b:8, op:'−', answer:5 },
+        { a:13, b:9, op:'−', answer:4 },
+        { a:14, b:5, op:'−', answer:9 },
+        { a:14, b:6, op:'−', answer:8 },
+        { a:14, b:8, op:'−', answer:6 },
+        { a:14, b:9, op:'−', answer:5 },
+        { a:15, b:6, op:'−', answer:9 },
+        { a:15, b:7, op:'−', answer:8 },
+        { a:15, b:8, op:'−', answer:7 },
+        { a:15, b:9, op:'−', answer:6 },
+        { a:16, b:7, op:'−', answer:9 },
+        { a:16, b:9, op:'−', answer:7 },
+        { a:17, b:8, op:'−', answer:9 },
+        { a:17, b:9, op:'−', answer:8 }
+      ],
+      3: [
+        { a:6, b:6, op:'×', answer:36 },
+        { a:6, b:7, op:'×', answer:42 },
+        { a:6, b:8, op:'×', answer:48 },
+        { a:6, b:9, op:'×', answer:54 },
+        { a:6, b:12, op:'×', answer:72 },
+        { a:7, b:7, op:'×', answer:49 },
+        { a:7, b:8, op:'×', answer:56 },
+        { a:7, b:9, op:'×', answer:63 },
+        { a:7, b:12, op:'×', answer:84 },
+        { a:8, b:8, op:'×', answer:64 },
+        { a:8, b:9, op:'×', answer:72 },
+        { a:8, b:12, op:'×', answer:96 },
+        { a:9, b:9, op:'×', answer:81 },
+        { a:9, b:12, op:'×', answer:108 },
+        { a:12, b:12, op:'×', answer:144 }
+      ],
+      4: [
+        { a:36, b:6, op:'÷', answer:6 },
+        { a:42, b:6, op:'÷', answer:7 },
+        { a:42, b:7, op:'÷', answer:6 },
+        { a:48, b:6, op:'÷', answer:8 },
+        { a:48, b:8, op:'÷', answer:6 },
+        { a:49, b:7, op:'÷', answer:7 },
+        { a:54, b:6, op:'÷', answer:9 },
+        { a:54, b:9, op:'÷', answer:6 },
+        { a:56, b:7, op:'÷', answer:8 },
+        { a:56, b:8, op:'÷', answer:7 },
+        { a:63, b:7, op:'÷', answer:9 },
+        { a:63, b:9, op:'÷', answer:7 },
+        { a:64, b:8, op:'÷', answer:8 },
+        { a:72, b:8, op:'÷', answer:9 },
+        { a:72, b:9, op:'÷', answer:8 },
+        { a:81, b:9, op:'÷', answer:9 },
+        { a:84, b:7, op:'÷', answer:12 },
+        { a:84, b:12, op:'÷', answer:7 },
+        { a:96, b:8, op:'÷', answer:12 },
+        { a:96, b:12, op:'÷', answer:8 }
+      ]
+    };
+
+    const questionIndex = { 1:0, 2:0, 3:0, 4:0 };
 
     // ===== Difficulty pacing per level =====
     // Level 1 (3D) keeps your original pacing
@@ -273,19 +369,19 @@
     function opForLevel(lvl) { return levelOps[lvl].sym; }
 
     function generateMathProblemForLevel(lvl) {
-      let a, b, op, answer;
-      switch (lvl) {
-        case 1: a = randInt(0, 20); b = randInt(0, 20); op = '+'; answer = a + b; break;
-        case 2: a = randInt(0, 20); b = randInt(0, 20); if (a < b) [a, b] = [b, a]; op = '−'; answer = a - b; break;
-        case 3: a = randInt(1, 12); b = randInt(1, 12); op = '×'; answer = a * b; break;
-        case 4: const q = randInt(1, 12), d = randInt(1, 12); a = q * d; b = d; op = '÷'; answer = q; break;
-        default: a = randInt(0, 20); b = randInt(0, 20); op = '+'; answer = a + b;
-      }
-      return { a, b, op, answer };
+      const list = levelQuestions[lvl];
+      const idx = questionIndex[lvl];
+      if (!list || idx >= list.length) return null;
+      return list[idx];
     }
 
     function showMathPrompt() {
       if (isReloading) return;
+      if (questionIndex[level] >= levelQuestions[level].length) {
+        bullets = bulletsPerReloadForLevel(level);
+        updateUI();
+        return;
+      }
       isReloading = true;
       currentMathProblem = generateMathProblemForLevel(level);
       promptTitle.textContent = `RELOAD — Level ${level}: ${levelOps[level].name}`;
@@ -309,6 +405,7 @@
       if (Number.isNaN(answer)) return;
 
       if (answer === currentMathProblem.answer) {
+        questionIndex[level]++;
         bullets = bulletsPerReloadForLevel(level);
         if (level !== 4 || !boss) { // while boss alive, don't add progress past goal
           correctThisLevel = Math.min(levelGoal, correctThisLevel + 1);
@@ -365,6 +462,7 @@
       isPaused = false;
       level = 1;
       correctThisLevel = 0;
+      for (let k in questionIndex) questionIndex[k] = 0;
       lastTime = 0;
       gameOverEl.style.display = 'none';
       youWinEl.style.display = 'none';
@@ -1007,28 +1105,26 @@
         currentMode = Modes.CANYON;
         document.body.classList.remove('ship-mode');
         canvas.style.cursor = 'crosshair';
-        levelGoal = 8;
       } else if (lvl === 2) {
         currentMode = Modes.BATS;
         document.body.classList.add('ship-mode');
         canvas.style.cursor = 'none';
         enemies2D = []; projectiles = []; explosions = []; boss = null;
         player.topMode = false; player.bulletDir = -1; clampPlayer();
-        levelGoal = 8;
       } else if (lvl === 3) {
         currentMode = Modes.JELLIES;
         document.body.classList.add('ship-mode');
         enemies2D = []; projectiles = []; explosions = []; boss = null;
         player.topMode = true; player.bulletDir = +1; clampPlayer();
-        levelGoal = 8;
       } else {
         currentMode = Modes.ALIENS;
         document.body.classList.add('ship-mode');
         enemies2D = []; projectiles = []; explosions = []; boss = null;
         player.topMode = false; player.bulletDir = -1; clampPlayer();
-        levelGoal = 8; // progress still tracked by math; boss gates the win
         initStars();
       }
+      questionIndex[lvl] = 0;
+      levelGoal = levelQuestions[lvl].length;
       levelEl.textContent = lvl;
       levelGoalEl.textContent = levelGoal;
       promptTitle.textContent = `RELOAD — Level ${lvl}: ${levelOps[lvl].name}`;
