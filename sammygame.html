@@ -181,10 +181,14 @@
     const bulletsPerReload = 10;
     let bullets = bulletsPerReload;
     let health = 100;
+    const heartSpawnInterval = 5; // seconds between heart drops
     let mouseX = canvas.width / 2;
     let mouseY = canvas.height / 2;
     let targets = [];      // Level-1 (3D) enemies
     let explosions = [];
+    let hearts = [];
+    let heartSpawnActive = false;
+    let heartSpawnTimer = 0;
     let currentMathProblem = null;
     let isReloading = false;
     let gameRunning = false; // start on title screen
@@ -454,6 +458,9 @@
       health = 100;
       targets = [];
       explosions = [];
+      hearts = [];
+      heartSpawnActive = false;
+      heartSpawnTimer = 0;
       enemies2D = [];
       projectiles = [];
       boss = null;
@@ -723,6 +730,33 @@
           ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI*2); ctx.fill();
         }
       }
+    }
+
+    class Heart {
+      constructor() {
+        this.x = randInt(30, canvas.width - 30);
+        this.y = -40;
+        this.vy = 60;
+        this.r = 16;
+      }
+      update(deltaSec) {
+        this.y += this.vy * speedMultiplier * deltaSec;
+        return this.y < canvas.height + 40;
+      }
+      draw() {
+        ctx.save();
+        ctx.fillStyle = '#ff4d4d';
+        ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 20;
+        const x = this.x, y = this.y, r = this.r;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.bezierCurveTo(x + r, y - r, x + r*2, y + r, x, y + r*2);
+        ctx.bezierCurveTo(x - r*2, y + r, x - r, y - r, x, y);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      }
+      hitTest(px, py, pr=0) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
     }
 
     // ---- Enemy types for 2D modes ----
@@ -1013,6 +1047,34 @@
           // Draw explosions
           explosions = explosions.filter(ex => { const alive = ex.update(dt); if (alive) ex.draw(); return alive; });
         }
+
+        if (!heartSpawnActive && health < 40) { heartSpawnActive = true; heartSpawnTimer = 0; }
+        if (heartSpawnActive) {
+          heartSpawnTimer -= deltaSec;
+          if (heartSpawnTimer <= 0) {
+            hearts.push(new Heart());
+            heartSpawnTimer = heartSpawnInterval;
+          }
+          if (health >= 75) heartSpawnActive = false;
+        }
+
+        hearts = hearts.filter(h => {
+          const alive = h.update(deltaSec);
+          if (!alive) return false;
+          h.draw();
+          if (currentMode !== Modes.CANYON) {
+            for (let i=0;i<projectiles.length;i++) {
+              const b = projectiles[i];
+              if (h.hitTest(b.x, b.y, b.r)) {
+                projectiles.splice(i,1);
+                health = Math.min(100, health + 10);
+                updateUI();
+                return false;
+              }
+            }
+          }
+          return true;
+        });
       }
 
       // Reticle or ship
@@ -1046,6 +1108,15 @@
       bullets--; updateUI();
 
       if (currentMode === Modes.CANYON) {
+        // hearts first
+        for (let i=0;i<hearts.length;i++) {
+          if (hearts[i].hitTest(mouseX, mouseY)) {
+            hearts.splice(i,1);
+            health = Math.min(100, health + 10);
+            updateUI();
+            return;
+          }
+        }
         // hitscan near-to-far
         const sorted = [...targets].sort((a, b) => a.z - b.z);
         for (let t of sorted) {
