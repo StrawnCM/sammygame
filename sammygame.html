@@ -8,20 +8,39 @@
     body { margin:0; padding:0; overflow:hidden; background:#000; font-family:'Courier New', monospace; cursor:crosshair; }
     #gameCanvas { display:block; background:#000; }
 
+    /* === UI === */
     #ui {
       position:absolute; top:10px; left:10px; color:#00ff00; font-size:18px; text-shadow:0 0 10px #00ff00; font-weight:bold;
-      background:rgba(0,0,0,0.5); border:2px solid #00ff00; padding:8px 10px; border-radius:6px;
-      user-select:none;
+      background:rgba(0,0,0,0.5); border:2px solid #00ff00; padding:8px 10px; border-radius:6px; user-select:none; z-index:5;
     }
     #ui .row { margin:3px 0; }
     #ui label { font-weight:bold; margin-right:6px; }
     #speedSlider { vertical-align:middle; }
     #speedLabel { display:inline-block; min-width:42px; text-align:right; margin-left:6px; }
 
+    /* === Start screen === */
+    #startScreen {
+      position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.98) 60%, rgba(0,0,0,1) 100%);
+      color:#ff9; text-align:center; z-index:10;
+      border: 3px solid #ff9; box-shadow:0 0 40px #ff9 inset, 0 0 60px #f80;
+    }
+    #startScreen h1 {
+      font-size:64px; margin:0 0 8px 0; letter-spacing:2px; color:#fff3aa;
+      text-shadow: 0 0 6px #ff9900, 0 0 18px #ff6600, 0 0 36px #ff3300;
+    }
+    #startScreen h2 { margin:0 0 24px 0; color:#ffa; font-weight:normal; }
+    #startBtn {
+      background:#ff9900; color:#000; border:none; padding:14px 26px; font-size:20px; font-weight:bold; cursor:pointer;
+      box-shadow:0 0 20px #ff9900; border-radius:6px;
+    }
+    #startBtn:hover { background:#ffaa22; }
+
+    /* === Math prompt === */
     #mathPrompt {
       position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
       background:rgba(0,0,0,0.9); border:3px solid #00ff00; padding:20px; color:#00ff00; text-align:center; display:none;
-      box-shadow:0 0 20px #00ff00; max-width:90%;
+      box-shadow:0 0 20px #00ff00; max-width:90%; z-index:6;
     }
     #mathPrompt h2 { margin:0 0 12px 0; font-size:22px; }
     #mathPrompt .q { font-size:36px; margin:16px 0 12px; }
@@ -35,9 +54,10 @@
     }
     #mathPrompt button:hover { background:#00cc00; }
 
+    /* === Overlays === */
     .overlay {
       position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
-      background:rgba(0,0,0,0.9); padding:28px; text-align:center; display:none; min-width:300px;
+      background:rgba(0,0,0,0.9); padding:28px; text-align:center; display:none; min-width:300px; z-index:7;
     }
     #gameOver { border:3px solid #ff0000; color:#ff0000; box-shadow:0 0 30px #ff0000; }
     #gameOver h2 { font-size:36px; margin:0 0 14px 0; }
@@ -50,13 +70,24 @@
     #levelBanner {
       position:absolute; top:50px; left:50%; transform:translateX(-50%);
       padding:10px 16px; border:2px solid #00ffcc; color:#00ffcc; background:rgba(0,0,0,0.75);
-      font-weight:bold; display:none; text-shadow:0 0 10px #00ffcc;
+      font-weight:bold; display:none; text-shadow:0 0 10px #00ffcc; z-index:5;
     }
+
+    /* Subtle hide crosshair on 2D ship levels; we toggle a class on <body> */
+    body.ship-mode { cursor:none; }
   </style>
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
 
+  <!-- START SCREEN -->
+  <div id="startScreen">
+    <h1>Sammy's Game</h1>
+    <h2>Math, Monsters, and Neon Mayhem</h2>
+    <button id="startBtn">Start</button>
+  </div>
+
+  <!-- HUD -->
   <div id="ui">
     <div class="row">Score: <span id="score">0</span></div>
     <div class="row">Bullets: <span id="bullets">10</span></div>
@@ -65,12 +96,12 @@
     <div class="row">Progress: <span id="progress">0</span>/<span id="levelGoal">8</span></div>
     <div class="row">
       <label for="speedSlider">Speed</label>
-      <!-- Allow slower-than-before starts -->
       <input type="range" id="speedSlider" min="0.25" max="2" step="0.05" value="0.50">
       <span id="speedLabel">0.5x</span>
     </div>
   </div>
 
+  <!-- Math reload -->
   <div id="mathPrompt">
     <h2 id="promptTitle">RELOAD — Level 1: Addition</h2>
     <div id="mathQuestion" class="q"></div>
@@ -78,6 +109,7 @@
     <button id="answerBtn">Fire!</button>
   </div>
 
+  <!-- End screens -->
   <div id="gameOver" class="overlay">
     <h2>GAME OVER</h2>
     <div>Final Score: <span id="finalScore">0</span></div>
@@ -102,6 +134,8 @@
       vanishingPoint.x = canvas.width / 2;
       vanishingPoint.y = canvas.height / 2;
       initDecor();
+      initStars(); // for level 4 background sizing
+      clampPlayer();
     }
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -129,6 +163,8 @@
     const restartBtn1 = document.getElementById('restartBtn1');
     const restartBtn2 = document.getElementById('restartBtn2');
     const levelBanner = document.getElementById('levelBanner');
+    const startScreen = document.getElementById('startScreen');
+    const startBtn = document.getElementById('startBtn');
 
     // ===== Game state =====
     let score = 0;
@@ -137,16 +173,16 @@
     let health = 100;
     let mouseX = canvas.width / 2;
     let mouseY = canvas.height / 2;
-    let targets = [];
+    let targets = [];      // Level-1 (3D) enemies
     let explosions = [];
     let currentMathProblem = null;
     let isReloading = false;
-    let gameRunning = true;
+    let gameRunning = false; // start on title screen
 
     // Levels & progression
     let level = 1;
     const maxLevel = 4;
-    const levelGoal = 8; // correct answers needed per level
+    let levelGoal = 8; // correct answers needed per level
     let correctThisLevel = 0;
 
     // Speed control (sync to slider at startup)
@@ -156,12 +192,13 @@
     let lastTime = 0; // ms timestamp from rAF
 
     // ===== Helpers =====
-    function randInt(min, max) { // inclusive
-      return Math.floor(Math.random() * (max - min + 1)) + min;
-    }
-    function randRange(min, max) {
-      return Math.random() * (max - min) + min;
-    }
+    function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; } // inclusive
+    function randRange(min, max) { return Math.random() * (max - min) + min; }
+    function clamp(val, a, b){ return Math.max(a, Math.min(b, val)); }
+
+    // ===== Modes (how a level behaves) =====
+    const Modes = { CANYON:'canyon', BATS:'bats', JELLIES:'jellies', ALIENS:'aliens' };
+    let currentMode = Modes.CANYON;
 
     // Per-level math label + symbol
     const levelOps = {
@@ -171,13 +208,35 @@
       4: { sym: '÷', name: 'Division' }
     };
 
-    // Per-level pacing tuned to start slower and ramp up
-    // spawnPerSec: expected spawns each second (Poisson process)
-    const levelParams = {
-      1: { speedRange: [0.20, 0.35], spawnPerSec: 0.60, zStart: 360 },
-      2: { speedRange: [0.25, 0.40], spawnPerSec: 0.80, zStart: 340 },
-      3: { speedRange: [0.30, 0.50], spawnPerSec: 1.00, zStart: 320 },
-      4: { speedRange: [0.35, 0.60], spawnPerSec: 1.20, zStart: 300 }
+    // ===== Difficulty pacing per level =====
+    // Level 1 (3D) keeps your original pacing
+    const level1Params = { speedRange: [0.20, 0.35], spawnPerSec: 0.60, zStart: 360 };
+
+    // ==== NEW: 2D mode parameters (pixels/second) ====
+    const level2Params = { // Bat Cave
+      spawnPerSec: 0.55,       // was 0.85 → fewer bats overall
+      vyRange: [120, 180],
+      ampRange: [30, 70],
+      freqRange: [0.6, 1.1],   // was 1.2–2.0 → slower left-right sway
+      hp: 1,
+      touchDamage: 10
+    };
+    const level3Params = { // Swamp/Underwater (rise up)
+      spawnPerSec: 1.0,
+      vyRange: [90, 140],     // upward speed
+      driftRange: [-40, 40],  // gentle sideways drift
+      hp: 2,                  // tougher
+      touchDamage: 12
+    };
+    const level4Params = { // Space + Boss
+      spawnPerSec: 1.15,
+      vyRange: [150, 220],
+      ampRange: [40, 90],
+      freqRange: [1.5, 2.8],
+      hp: 1,
+      bossHP: 14,
+      bossSpeed: 120,
+      touchDamage: 12
     };
 
     function showBanner(text, ms=1200) {
@@ -185,7 +244,6 @@
       levelBanner.style.display = 'block';
       setTimeout(() => levelBanner.style.display = 'none', ms);
     }
-
     function syncSpeedFromSlider() {
       speedMultiplier = parseFloat(speedSlider.value);
       speedLabel.textContent = speedMultiplier.toFixed(1) + 'x';
@@ -199,32 +257,18 @@
       progressEl.textContent = correctThisLevel;
       levelGoalEl.textContent = levelGoal;
 
-      if (health <= 0 && gameRunning) {
-        gameOver();
-      }
+      if (health <= 0 && gameRunning) gameOver();
     }
-
     function opForLevel(lvl) { return levelOps[lvl].sym; }
 
     function generateMathProblemForLevel(lvl) {
-      // Easier facts:
-      // - Addition/Subtraction: two numbers each 0..20, no negative results
-      // - Multiplication: 1..12 × 1..12
-      // - Division: (1..12 * 1..12) ÷ (1..12) → whole-number quotient 1..12
       let a, b, op, answer;
-
       switch (lvl) {
-        case 1: // Addition
-          a = randInt(0, 20); b = randInt(0, 20); op = '+'; answer = a + b; break;
-        case 2: // Subtraction (no negatives)
-          a = randInt(0, 20); b = randInt(0, 20); if (a < b) [a, b] = [b, a]; op = '−'; answer = a - b; break;
-        case 3: // Multiplication (12×12 table)
-          a = randInt(1, 12); b = randInt(1, 12); op = '×'; answer = a * b; break;
-        case 4: // Division (whole-number)
-          const q = randInt(1, 12), d = randInt(1, 12);
-          a = q * d; b = d; op = '÷'; answer = q; break;
-        default:
-          a = randInt(0, 20); b = randInt(0, 20); op = '+'; answer = a + b;
+        case 1: a = randInt(0, 20); b = randInt(0, 20); op = '+'; answer = a + b; break;
+        case 2: a = randInt(0, 20); b = randInt(0, 20); if (a < b) [a, b] = [b, a]; op = '−'; answer = a - b; break;
+        case 3: a = randInt(1, 12); b = randInt(1, 12); op = '×'; answer = a * b; break;
+        case 4: const q = randInt(1, 12), d = randInt(1, 12); a = q * d; b = d; op = '÷'; answer = q; break;
+        default: a = randInt(0, 20); b = randInt(0, 20); op = '+'; answer = a + b;
       }
       return { a, b, op, answer };
     }
@@ -240,6 +284,13 @@
       mathAnswerEl.focus();
     }
 
+    // Boss gate: on level 4, after you've hit the goal once, we spawn a boss and
+    // you must defeat it to win. Progress stays capped at levelGoal meanwhile.
+    let boss = null; // holds boss entity on level 4
+    
+    function bulletsPerReloadForLevel(lvl) {
+      return (lvl === 2) ? 15 : bulletsPerReload; // L2 gets 15, others keep default 10
+    }
     function checkAnswer() {
       const val = mathAnswerEl.value.trim();
       if (val === '') return;
@@ -247,25 +298,28 @@
       if (Number.isNaN(answer)) return;
 
       if (answer === currentMathProblem.answer) {
-        bullets = bulletsPerReload;
-        correctThisLevel++;
+        bullets = bulletsPerReloadForLevel(level);
+        if (level !== 4 || !boss) { // while boss alive, don't add progress past goal
+          correctThisLevel = Math.min(levelGoal, correctThisLevel + 1);
+        }
         updateUI();
 
-        // Level progression
+        // Handle level advance or boss spawn
         if (correctThisLevel >= levelGoal) {
           if (level < maxLevel) {
             level++;
             correctThisLevel = 0;
+            configureLevel(level);
             showBanner(`Level ${level}: ${levelOps[level].name}`);
           } else {
-            winGame();
+            // Level 4: gate by boss. If not spawned, spawn now.
+            if (!boss) spawnBoss();
           }
         }
 
         mathPrompt.style.display = 'none';
         isReloading = false;
       } else {
-        // brief visual miss feedback
         mathAnswerEl.style.borderColor = '#ff0000';
         setTimeout(() => {
           mathAnswerEl.style.borderColor = '#00ff00';
@@ -280,7 +334,6 @@
       finalScoreEl.textContent = score;
       gameOverEl.style.display = 'block';
     }
-
     function winGame() {
       gameRunning = false;
       finalWinScoreEl.textContent = score;
@@ -293,6 +346,9 @@
       health = 100;
       targets = [];
       explosions = [];
+      enemies2D = [];
+      projectiles = [];
+      boss = null;
       gameRunning = true;
       isReloading = false;
       level = 1;
@@ -302,11 +358,12 @@
       youWinEl.style.display = 'none';
       mathPrompt.style.display = 'none';
       syncSpeedFromSlider();
+      configureLevel(1);
       updateUI();
       showBanner(`Level ${level}: ${levelOps[level].name}`);
     }
 
-    // ===== Entities =====
+    // ===== ENTITIES — Level 1 (3D skulls, original Target) =====
     class Target {
       constructor(params) {
         this.x = (Math.random() - 0.5) * 200;
@@ -316,21 +373,13 @@
         this.size = 20;
         this.hit = false;
       }
-
       update(dt) {
         if (!this.hit) {
-          // dt is normalized such that dt=1 at 60fps
           this.z -= this.baseSpeed * speedMultiplier * dt;
-
-          if (this.z <= 1) {
-            health -= 10;
-            updateUI();
-            return false;
-          }
+          if (this.z <= 1) { health -= 10; updateUI(); return false; }
         }
         return true;
       }
-
       getScreenCoords() {
         const scale = 200 / Math.max(1, this.z);
         const screenX = vanishingPoint.x + (this.x * scale);
@@ -338,73 +387,43 @@
         const screenSize = this.size * scale;
         return { x: screenX, y: screenY, size: screenSize };
       }
-
       draw() {
         const c = this.getScreenCoords();
         ctx.save();
-
         const size = c.size;
         ctx.shadowColor = '#00ff00';
         ctx.shadowBlur = size * 0.5;
 
         // Skull cranium
         ctx.fillStyle = '#f0f0f0';
-        ctx.beginPath();
-        ctx.arc(c.x, c.y - size * 0.2, size * 0.8, 0, Math.PI * 2);
-        ctx.fill();
-
+        ctx.beginPath(); ctx.arc(c.x, c.y - size * 0.2, size * 0.8, 0, Math.PI * 2); ctx.fill();
         // Jaw
-        ctx.beginPath();
-        ctx.ellipse(c.x, c.y + size * 0.3, size * 0.6, size * 0.5, 0, 0, Math.PI * 2);
-        ctx.fill();
-
+        ctx.beginPath(); ctx.ellipse(c.x, c.y + size * 0.3, size * 0.6, size * 0.5, 0, 0, Math.PI * 2); ctx.fill();
         // Eyes
         ctx.fillStyle = '#000';
-        ctx.beginPath();
-        ctx.ellipse(c.x - size * 0.25, c.y - size * 0.2, size * 0.2, size * 0.25, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(c.x + size * 0.25, c.y - size * 0.2, size * 0.2, size * 0.25, 0, 0, Math.PI * 2);
-        ctx.fill();
-
+        ctx.beginPath(); ctx.ellipse(c.x - size * 0.25, c.y - size * 0.2, size * 0.2, size * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(c.x + size * 0.25, c.y - size * 0.2, size * 0.2, size * 0.25, 0, 0, Math.PI * 2); ctx.fill();
         // Eye glow
-        ctx.fillStyle = '#ff0000';
-        ctx.shadowColor = '#ff0000';
-        ctx.shadowBlur = 10;
+        ctx.fillStyle = '#ff0000'; ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 10;
         ctx.beginPath(); ctx.arc(c.x - size * 0.25, c.y - size * 0.2, size * 0.05, 0, Math.PI * 2); ctx.fill();
         ctx.beginPath(); ctx.arc(c.x + size * 0.25, c.y - size * 0.2, size * 0.05, 0, Math.PI * 2); ctx.fill();
-
         // Nose
         ctx.fillStyle = '#000'; ctx.shadowBlur = 0;
-        ctx.beginPath();
-        ctx.moveTo(c.x, c.y);
-        ctx.lineTo(c.x - size * 0.1, c.y + size * 0.15);
-        ctx.lineTo(c.x + size * 0.1, c.y + size * 0.15);
+        ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x - size * 0.1, c.y + size * 0.15); ctx.lineTo(c.x + size * 0.1, c.y + size * 0.15);
         ctx.closePath(); ctx.fill();
-
         // Teeth
-        ctx.fillStyle = '#f0f0f0';
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 1;
-        const teethCount = 6;
-        const teethWidth = (size * 0.6) / teethCount;
+        ctx.fillStyle = '#f0f0f0'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+        const teethCount = 6; const teethWidth = (size * 0.6) / teethCount;
         for (let i = 0; i < teethCount; i++) {
           const x = c.x - size * 0.3 + i * teethWidth + teethWidth / 2;
           ctx.fillRect(x - teethWidth * 0.3, c.y + size * 0.35, teethWidth * 0.6, size * 0.15);
           ctx.strokeRect(x - teethWidth * 0.3, c.y + size * 0.35, teethWidth * 0.6, size * 0.15);
         }
-
         // Crack
-        ctx.strokeStyle = '#666';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(c.x - size * 0.1, c.y - size * 0.6);
-        ctx.lineTo(c.x - size * 0.05, c.y - size * 0.3);
-        ctx.stroke();
-
+        ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(c.x - size * 0.1, c.y - size * 0.6); ctx.lineTo(c.x - size * 0.05, c.y - size * 0.3); ctx.stroke();
         ctx.restore();
       }
-
       checkHit(x, y) {
         const c = this.getScreenCoords();
         const dist = Math.hypot(x - c.x, y - c.y);
@@ -417,12 +436,7 @@
         this.x = x; this.y = y;
         this.particles = [];
         for (let i = 0; i < 15; i++) {
-          this.particles.push({
-            x, y,
-            vx: (Math.random() - 0.5) * 8,
-            vy: (Math.random() - 0.5) * 8,
-            life: 1
-          });
+          this.particles.push({ x, y, vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8, life: 1 });
         }
       }
       update(dt) {
@@ -445,7 +459,7 @@
       }
     }
 
-    // ===== Background =====
+    // ===== Backgrounds (Level 1 canyon as-is) =====
     const tombstones = [];
     function initDecor() {
       tombstones.length = 0;
@@ -456,7 +470,6 @@
         tombstones.push({ x, y, size });
       }
     }
-
     function drawCanyon() {
       const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
       gradient.addColorStop(0, '#000000');
@@ -468,15 +481,10 @@
       const fogGradient = ctx.createRadialGradient(vanishingPoint.x, vanishingPoint.y, 0, vanishingPoint.x, vanishingPoint.y, canvas.width);
       fogGradient.addColorStop(0, 'rgba(0, 255, 0, 0.1)');
       fogGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = fogGradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = fogGradient; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      ctx.strokeStyle = '#004400';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = '#00ff00';
-      ctx.shadowBlur = 5;
+      ctx.strokeStyle = '#004400'; ctx.lineWidth = 2; ctx.shadowColor = '#00ff00'; ctx.shadowBlur = 5;
 
-      // Perspective lines from edges
       for (let i = 0; i <= 10; i++) {
         const lx = (i / 10) * vanishingPoint.x;
         ctx.beginPath(); ctx.moveTo(lx, canvas.height); ctx.lineTo(vanishingPoint.x, vanishingPoint.y); ctx.stroke();
@@ -486,22 +494,17 @@
         ctx.beginPath(); ctx.moveTo(rx, canvas.height); ctx.lineTo(vanishingPoint.x, vanishingPoint.y); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(rx, 0);             ctx.lineTo(vanishingPoint.x, vanishingPoint.y); ctx.stroke();
       }
-
-      // Depth rectangles
       for (let i = 1; i <= 8; i++) {
         const f = i / 8;
         const left = vanishingPoint.x - (vanishingPoint.x * f);
         const right = vanishingPoint.x + ((canvas.width - vanishingPoint.x) * f);
         const top = vanishingPoint.y - (vanishingPoint.y * f);
         const bottom = vanishingPoint.y + ((canvas.height - vanishingPoint.y) * f);
-        ctx.beginPath();
-        ctx.moveTo(left, top); ctx.lineTo(right, top); ctx.lineTo(right, bottom); ctx.lineTo(left, bottom);
+        ctx.beginPath(); ctx.moveTo(left, top); ctx.lineTo(right, top); ctx.lineTo(right, bottom); ctx.lineTo(left, bottom);
         ctx.closePath(); ctx.stroke();
       }
-
       ctx.shadowBlur = 0;
 
-      // Foreground tombstones (static)
       ctx.fillStyle = '#002200';
       tombstones.forEach(t => {
         ctx.fillRect(t.x - t.size / 2, t.y - t.size, t.size, t.size);
@@ -509,109 +512,470 @@
       });
     }
 
-    // ===== Loop =====
+    // ===== NEW: 2D mode (enemies, player, bullets) =====
+    let enemies2D = [];
+    let projectiles = [];
+
+    const player = {
+      x: canvas.width * 0.5,
+      y: canvas.height - 60, // bottom by default (L2, L4)
+      w: 26, h: 26,
+      speed: 480, // px/s
+      moveLeft: false, moveRight: false,
+      topMode: false,       // L3 puts the ship at the top
+      bulletDir: -1,        // up on L2/L4, down on L3
+    };
+    function clampPlayer() {
+      player.x = clamp(player.x, 30, canvas.width - 30);
+      player.y = player.topMode ? 60 : canvas.height - 60;
+    }
+    function drawShip() {
+      const x = player.x, y = player.y, s = 18;
+      ctx.save();
+      ctx.shadowColor = currentMode === Modes.BATS ? '#ff7a00' : (currentMode===Modes.JELLIES ? '#66ffd4' : '#7afcff');
+      ctx.shadowBlur = 15;
+      ctx.fillStyle = currentMode===Modes.BATS ? '#ffa64d' : (currentMode===Modes.JELLIES ? '#66ffee' : '#aef');
+      ctx.beginPath();
+      ctx.moveTo(x, y - s);
+      ctx.lineTo(x - s*0.7, y + s*0.9);
+      ctx.lineTo(x + s*0.7, y + s*0.9);
+      ctx.closePath(); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+
+    class Bullet {
+      constructor(x, y, dir) {
+        this.x = x; this.y = y; this.dir = dir; // -1 up, +1 down
+        this.speed = 620;
+        this.r = 3.5;
+      }
+      update(deltaSec) {
+        this.y += this.dir * this.speed * deltaSec; // bullets ignore slow-mo
+        return (this.y > -20 && this.y < canvas.height + 20);
+      }
+      draw() {
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI*2); ctx.fill();
+      }
+    }
+
+    // ---- Enemy types for 2D modes ----
+    class Bat {
+      constructor() {
+        this.x0 = randInt(30, canvas.width - 30);
+        this.y = -40; // top
+        this.amp = randRange(level2Params.ampRange[0], level2Params.ampRange[1]);
+        this.freq = randRange(level2Params.freqRange[0], level2Params.freqRange[1]);
+        this.vy = randRange(level2Params.vyRange[0], level2Params.vyRange[1]);
+        this.hp = level2Params.hp;
+        this.t = Math.random()*10;
+        this.r = 18;
+      }
+      update(deltaSec) {
+        this.t += deltaSec;
+        this.x = this.x0 + Math.sin(this.t * Math.PI * 2 * this.freq) * this.amp;
+        this.y += this.vy * speedMultiplier * deltaSec;
+        // Touch bottom line (player row) => damage
+        if (this.y >= canvas.height - 24) { health -= level2Params.touchDamage; updateUI(); return false; }
+        return true;
+      }
+      draw() {
+        // orange-glow bat
+        ctx.save();
+        ctx.shadowColor = '#ff7a00'; ctx.shadowBlur = 22;
+        ctx.fillStyle = '#ff7a00';
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y - 4);
+        ctx.quadraticCurveTo(this.x - 20, this.y + 10, this.x - 10, this.y + 16);
+        ctx.lineTo(this.x, this.y + 4);
+        ctx.lineTo(this.x + 10, this.y + 16);
+        ctx.quadraticCurveTo(this.x + 20, this.y + 10, this.x, this.y - 4);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // eyes
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(this.x - 4, this.y + 4, 2.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(this.x + 4, this.y + 4, 2.5, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+      hitTest(px, py, pr) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
+    }
+
+    class Jelly {
+      constructor() {
+        this.x = randInt(30, canvas.width - 30);
+        this.y = canvas.height + 40; // from bottom, going up
+        this.vy = -randRange(level3Params.vyRange[0], level3Params.vyRange[1]);
+        this.vx = randRange(level3Params.driftRange[0], level3Params.driftRange[1]);
+        this.hp = level3Params.hp;
+        this.r = 20;
+        this.pulse = Math.random()*Math.PI*2;
+      }
+      update(deltaSec) {
+        this.pulse += deltaSec*2;
+        this.x += this.vx * speedMultiplier * deltaSec;
+        this.y += this.vy * speedMultiplier * deltaSec;
+        if (this.y <= 24) { health -= level3Params.touchDamage; updateUI(); return false; }
+        if (this.x < -30 || this.x > canvas.width + 30) return false;
+        return true;
+      }
+      draw() {
+        ctx.save();
+        ctx.shadowColor = '#66ffd4'; ctx.shadowBlur = 18;
+        ctx.fillStyle = '#66ffd4';
+        const r = this.r * (0.9 + 0.1*Math.sin(this.pulse));
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y, r*0.9, r*0.7, 0, 0, Math.PI*2); ctx.fill();
+        // tendrils
+        ctx.strokeStyle = '#44ddb8'; ctx.lineWidth = 2;
+        for (let i=-2;i<=2;i++){
+          ctx.beginPath();
+          ctx.moveTo(this.x + i*4, this.y + r*0.3);
+          ctx.quadraticCurveTo(this.x + i*6, this.y + r*0.6, this.x + i*3, this.y + r);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      hitTest(px, py, pr) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
+    }
+
+    class Alien {
+      constructor() {
+        this.x0 = randInt(30, canvas.width - 30);
+        this.y = -40;
+        this.amp = randRange(level4Params.ampRange[0], level4Params.ampRange[1]);
+        this.freq = randRange(level4Params.freqRange[0], level4Params.freqRange[1]);
+        this.vy = randRange(level4Params.vyRange[0], level4Params.vyRange[1]);
+        this.hp = level4Params.hp;
+        this.t = Math.random()*10;
+        this.r = 18;
+      }
+      update(deltaSec) {
+        this.t += deltaSec;
+        this.x = this.x0 + Math.cos(this.t * Math.PI * 2 * this.freq) * this.amp;
+        this.y += this.vy * speedMultiplier * deltaSec;
+        if (this.y >= canvas.height - 24) { health -= level4Params.touchDamage; updateUI(); return false; }
+        return true;
+      }
+      draw() {
+        ctx.save();
+        ctx.shadowColor = '#7afcff'; ctx.shadowBlur = 22;
+        ctx.fillStyle = '#9fe6ff';
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y, 18, 12, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#003f5c';
+        ctx.beginPath(); ctx.ellipse(this.x, this.y, 8, 6, 0, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+      hitTest(px, py, pr) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
+    }
+
+    class Boss {
+      constructor() {
+        this.x = canvas.width/2; this.y = 120;
+        this.vx = level4Params.bossSpeed; this.dir = 1;
+        this.hp = level4Params.bossHP;
+        this.r = 42;
+      }
+      update(deltaSec) {
+        this.x += this.dir * this.vx * speedMultiplier * deltaSec;
+        if (this.x < 60) { this.x = 60; this.dir = 1; }
+        if (this.x > canvas.width - 60) { this.x = canvas.width - 60; this.dir = -1; }
+        return this.hp > 0;
+      }
+      draw() {
+        ctx.save();
+        ctx.shadowColor = '#ff3'; ctx.shadowBlur = 28;
+        ctx.fillStyle = '#ffd54d';
+        ctx.beginPath(); ctx.ellipse(this.x, this.y, 70, 40, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ff7733';
+        ctx.beginPath(); ctx.arc(this.x-22, this.y-6, 8, 0, Math.PI*2); ctx.arc(this.x+22, this.y-6, 8, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#222';
+        ctx.fillRect(this.x-18, this.y+10, 36, 4);
+        ctx.restore();
+
+        // Boss health bar
+        const w = 240, h = 8, x = canvas.width/2 - w/2, y = 24;
+        ctx.strokeStyle = '#ff3'; ctx.strokeRect(x, y, w, h);
+        const frac = clamp(this.hp / level4Params.bossHP, 0, 1);
+        ctx.fillStyle = '#ff3'; ctx.fillRect(x, y, w*frac, h);
+      }
+      hitTest(px, py, pr) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
+    }
+
+    // ===== NEW: 2D backgrounds =====
+    function drawBatCaveBG() {
+      // Dark center with orange border glow (like your screenshot)
+      ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      const g = ctx.createRadialGradient(canvas.width/2, canvas.height/2, canvas.width*0.2, canvas.width/2, canvas.height/2, canvas.width*0.8);
+      g.addColorStop(0,'rgba(0,0,0,0.6)'); g.addColorStop(1,'rgba(0,0,0,1)'); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
+      // Frame glow
+      ctx.shadowColor = '#ff7a00'; ctx.shadowBlur = 35; ctx.strokeStyle = '#ff7a00'; ctx.lineWidth = 6;
+      ctx.strokeRect(20,20,canvas.width-40,canvas.height-40);
+      ctx.shadowBlur = 0;
+    }
+    function drawSwampBG() {
+      const g = ctx.createLinearGradient(0,0,0,canvas.height);
+      g.addColorStop(0,'#001015'); g.addColorStop(0.5,'#002b2b'); g.addColorStop(1,'#003a2a');
+      ctx.fillStyle = g; ctx.fillRect(0,0,canvas.width,canvas.height);
+      // Murky bubbles
+      for (let i=0;i<12;i++){
+        const x = (i/11)*canvas.width + Math.sin(i)*40, y = canvas.height*0.6 + (i%2)*40;
+        ctx.fillStyle = 'rgba(80,180,140,0.08)'; ctx.beginPath(); ctx.arc(x,y, randRange(14,38), 0, Math.PI*2); ctx.fill();
+      }
+    }
+
+    // Starfield for Level 4
+    let stars = [];
+    function initStars() {
+      const count = Math.floor((canvas.width*canvas.height)/25000);
+      stars = Array.from({length: count}, () => ({
+        x: Math.random()*canvas.width,
+        y: Math.random()*canvas.height,
+        z: Math.random()*2 + 0.5
+      }));
+    }
+    function drawSpaceBG(deltaSec) {
+      ctx.fillStyle = '#000015'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = '#9fe6ff';
+      stars.forEach(s => {
+        s.y += 40*s.z*speedMultiplier*deltaSec;
+        if (s.y > canvas.height) { s.y = 0; s.x = Math.random()*canvas.width; s.z = Math.random()*2 + 0.5; }
+        ctx.fillRect(s.x, s.y, s.z, s.z);
+      });
+      // subtle nebula
+      const g = ctx.createRadialGradient(canvas.width*0.7, canvas.height*0.3, 10, canvas.width*0.7, canvas.height*0.3, canvas.width*0.6);
+      g.addColorStop(0,'rgba(120,200,255,0.15)'); g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+
+    // ===== Game loop =====
     function gameLoop(timestamp) {
       if (!lastTime) lastTime = timestamp;
       const deltaMs = timestamp - lastTime;
-      // dt normalized so dt=1 at 60fps; deltaSec is real seconds
-      const dt = deltaMs / (1000 / 60);
-      const deltaSec = deltaMs / 1000;
+      const dt = deltaMs / (1000 / 60);   // normalized (60fps)
+      const deltaSec = deltaMs / 1000;    // real seconds
       lastTime = timestamp;
 
-      drawCanyon();
+      // Background per-level
+      if (currentMode === Modes.CANYON) drawCanyon();
+      else if (currentMode === Modes.BATS) drawBatCaveBG();
+      else if (currentMode === Modes.JELLIES) drawSwampBG();
+      else if (currentMode === Modes.ALIENS) drawSpaceBG(deltaSec);
 
       if (gameRunning) {
-        // Stable-rate spawning using a Poisson process
-        const lp = levelParams[level];
-        const reloadFactor = isReloading ? 0.35 : 1.0; // slow spawns while math prompt is up
-        const lambda = lp.spawnPerSec * reloadFactor;
-        const spawnProb = 1 - Math.exp(-lambda * deltaSec);
-        if (Math.random() < spawnProb) {
-          targets.push(new Target(lp));
+        if (currentMode === Modes.CANYON) {
+          // Stable spawns (Poisson)
+          const lp = level1Params;
+          const reloadFactor = isReloading ? 0.35 : 1.0;
+          const lambda = lp.spawnPerSec * reloadFactor * speedMultiplier;
+          const spawnProb = 1 - Math.exp(-lambda * deltaSec);
+          if (Math.random() < spawnProb) targets.push(new Target(lp));
+
+          // Draw far-to-near (bigger z first)
+          targets.sort((a, b) => b.z - a.z);
+          targets = targets.filter(t => { const alive = t.update(dt); if (alive) t.draw(); return alive; });
+          explosions = explosions.filter(ex => { const alive = ex.update(dt); if (alive) ex.draw(); return alive; });
+
+        } else {
+          // ==== NEW: 2D mode update ====
+          // Spawn by level
+          let spawnPerSec = (currentMode===Modes.BATS?level2Params.spawnPerSec:
+                             currentMode===Modes.JELLIES?level3Params.spawnPerSec:level4Params.spawnPerSec);
+          const reloadFactor = isReloading ? 0.35 : 1.0;
+          const lambda = spawnPerSec * reloadFactor * speedMultiplier;
+          const spawnProb = 1 - Math.exp(-lambda * deltaSec);
+
+          if (!boss) { // while boss alive we stop adding more aliens
+            if (Math.random() < spawnProb) {
+              if (currentMode === Modes.BATS) enemies2D.push(new Bat());
+              else if (currentMode === Modes.JELLIES) enemies2D.push(new Jelly());
+              else if (currentMode === Modes.ALIENS) enemies2D.push(new Alien());
+            }
+          }
+
+          // Player motion (keyboard or mouse X) — ship speed is not slowed
+          const move = (player.moveRight ? 1 : 0) - (player.moveLeft ? 1 : 0);
+          player.x += move * player.speed * deltaSec;
+          clampPlayer();
+
+          // Update bullets
+          projectiles = projectiles.filter(b => { const alive = b.update(deltaSec); if (alive) b.draw(); return alive; });
+
+          // Collisions: bullets vs enemies
+          enemies2D = enemies2D.filter(en => {
+            // move enemy
+            const alive = en.update(deltaSec);
+            if (!alive) return false;
+
+            // draw enemy
+            en.draw();
+
+            // collide with player row (bonus: grazing not required since damage handled on update)
+
+            // bullets hit
+            for (let i=0;i<projectiles.length;i++){
+              const b = projectiles[i];
+              if (en.hitTest(b.x, b.y, b.r)) {
+                en.hp--; score += 25; // per-hit score
+                projectiles.splice(i,1);
+                explosions.push(new Explosion(en.x || en.x0 || b.x, en.y || b.y));
+                break;
+              }
+            }
+            return en.hp > 0;
+          });
+
+          // Boss update/draw/hit
+          if (boss) {
+            if (!boss.update(deltaSec)) { boss = null; winGame(); }
+            else {
+              boss.draw();
+              // bullets vs boss
+              for (let i=0;i<projectiles.length;i++){
+                const b = projectiles[i];
+                if (boss.hitTest(b.x, b.y, b.r)) {
+                  boss.hp--; score += 40;
+                  projectiles.splice(i,1);
+                  explosions.push(new Explosion(boss.x, boss.y));
+                  break;
+                }
+              }
+            }
+          }
+
+          // Draw explosions
+          explosions = explosions.filter(ex => { const alive = ex.update(dt); if (alive) ex.draw(); return alive; });
         }
-
-        // Draw far-to-near (bigger z first)
-        targets.sort((a, b) => b.z - a.z);
-
-        targets = targets.filter(t => {
-          const alive = t.update(dt);
-          if (alive) t.draw();
-          return alive;
-        });
-
-        explosions = explosions.filter(ex => {
-          const alive = ex.update(dt);
-          if (alive) ex.draw();
-          return alive;
-        });
       }
 
-      drawCrosshair();
+      // Reticle or ship
+      if (currentMode === Modes.CANYON) drawCrosshair();
+      else drawShip();
+
       requestAnimationFrame(gameLoop);
     }
 
     function drawCrosshair() {
-      ctx.strokeStyle = '#00ff00';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = '#00ff00';
-      ctx.shadowBlur = 5;
-      ctx.beginPath();
-      ctx.arc(mouseX, mouseY, 15, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2; ctx.shadowColor = '#00ff00'; ctx.shadowBlur = 5;
+      ctx.beginPath(); ctx.arc(mouseX, mouseY, 15, 0, Math.PI * 2); ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(mouseX - 20, mouseY); ctx.lineTo(mouseX - 10, mouseY);
       ctx.moveTo(mouseX + 10, mouseY); ctx.lineTo(mouseX + 20, mouseY);
       ctx.moveTo(mouseX, mouseY - 20); ctx.lineTo(mouseX, mouseY - 10);
       ctx.moveTo(mouseX, mouseY + 10); ctx.lineTo(mouseX, mouseY + 20);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+      ctx.stroke(); ctx.shadowBlur = 0;
     }
 
     // ===== Events =====
-    canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
+    canvas.addEventListener('mousemove', (e) => {
+      mouseX = e.clientX; mouseY = e.clientY;
+      if (currentMode !== Modes.CANYON) { player.x = e.clientX; clampPlayer(); }
+    });
 
-    canvas.addEventListener('click', (e) => {
-      if (!gameRunning) return;
-      if (bullets > 0 && !isReloading) {
-        bullets--;
-        updateUI();
+    // Shooting
+    function tryShoot() {
+      if (!gameRunning || isReloading) return;
+      if (bullets <= 0) { showMathPrompt(); return; }
+      bullets--; updateUI();
 
-        // Check near-to-far for hits
+      if (currentMode === Modes.CANYON) {
+        // hitscan near-to-far
         const sorted = [...targets].sort((a, b) => a.z - b.z);
         for (let t of sorted) {
-          if (t.checkHit(e.clientX, e.clientY)) {
+          if (t.checkHit(mouseX, mouseY)) {
             score += Math.floor(100 / t.z * 10);
-            explosions.push(new Explosion(e.clientX, e.clientY));
+            explosions.push(new Explosion(mouseX, mouseY));
             targets.splice(targets.indexOf(t), 1);
             updateUI();
             break;
           }
         }
-
-        if (bullets === 0) {
-          showMathPrompt();
-        }
+      } else {
+        // projectile from ship
+        projectiles.push(new Bullet(player.x, player.y + (player.bulletDir>0?12:-12), player.bulletDir));
       }
-    });
+
+      if (bullets === 0) showMathPrompt();
+    }
+
+    canvas.addEventListener('click', tryShoot);
 
     mathAnswerEl.addEventListener('keypress', (e) => { if (e.key === 'Enter') checkAnswer(); });
     answerBtn.addEventListener('click', checkAnswer);
 
-    restartBtn1.addEventListener('click', restartGame);
-    restartBtn2.addEventListener('click', restartGame);
+    restartBtn1.addEventListener('click', () => { startScreen.style.display='none'; restartGame(); });
+    restartBtn2.addEventListener('click', () => { startScreen.style.display='none'; restartGame(); });
 
-    speedSlider.addEventListener('input', () => {
-      syncSpeedFromSlider();
-    });
+    speedSlider.addEventListener('input', () => { syncSpeedFromSlider(); });
 
     window.addEventListener('resize', resize);
 
+    // Keyboard controls for ship levels
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') player.moveLeft = true;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') player.moveRight = true;
+      if (e.key === ' ' ) { e.preventDefault(); tryShoot(); }
+      if (!gameRunning && e.key === 'Enter' && startScreen.style.display !== 'none') startBtn.click();
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') player.moveLeft = false;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') player.moveRight = false;
+    });
+
+    // Start screen button
+    startBtn.addEventListener('click', () => {
+      startScreen.style.display = 'none';
+      restartGame();
+    });
+
+    // ===== Level configuration =====
+    function configureLevel(lvl) {
+      // Switch interaction mode + background helpers
+      if (lvl === 1) {
+        currentMode = Modes.CANYON;
+        document.body.classList.remove('ship-mode');
+        canvas.style.cursor = 'crosshair';
+        levelGoal = 8;
+      } else if (lvl === 2) {
+        currentMode = Modes.BATS;
+        document.body.classList.add('ship-mode');
+        canvas.style.cursor = 'none';
+        enemies2D = []; projectiles = []; explosions = []; boss = null;
+        player.topMode = false; player.bulletDir = -1; clampPlayer();
+        levelGoal = 8;
+      } else if (lvl === 3) {
+        currentMode = Modes.JELLIES;
+        document.body.classList.add('ship-mode');
+        enemies2D = []; projectiles = []; explosions = []; boss = null;
+        player.topMode = true; player.bulletDir = +1; clampPlayer();
+        levelGoal = 8;
+      } else {
+        currentMode = Modes.ALIENS;
+        document.body.classList.add('ship-mode');
+        enemies2D = []; projectiles = []; explosions = []; boss = null;
+        player.topMode = false; player.bulletDir = -1; clampPlayer();
+        levelGoal = 8; // progress still tracked by math; boss gates the win
+        initStars();
+      }
+      levelEl.textContent = lvl;
+      levelGoalEl.textContent = levelGoal;
+      promptTitle.textContent = `RELOAD — Level ${lvl}: ${levelOps[lvl].name}`;
+    }
+
+    function spawnBoss() {
+      boss = new Boss();
+      showBanner('BOSS INCOMING!', 1600);
+    }
+
     // ===== Start =====
     initDecor();
-    syncSpeedFromSlider(); // <- ensures we actually start at the slider's (slow) value
+    initStars();
+    syncSpeedFromSlider(); // ensure slider value applies
     updateUI();
     requestAnimationFrame(gameLoop);
-    showBanner(`Level ${level}: ${levelOps[level].name}`);
+    // Leave title showing; game begins when Start is clicked.
   </script>
 </body>
 </html>
