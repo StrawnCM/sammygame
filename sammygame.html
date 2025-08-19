@@ -95,6 +95,7 @@
     <div class="row">Score: <span id="score">0</span></div>
     <div class="row">Bullets: <span id="bullets">10</span></div>
     <div class="row">Health: <span id="health">100</span></div>
+    <div class="row">Lives: <span id="lives">❤️❤️❤️</span></div>
     <div class="row">Level: <span id="level">1</span>/4</div>
     <div class="row">Progress: <span id="progress">0</span>/<span id="levelGoal">0</span></div>
     <div class="row">
@@ -154,6 +155,7 @@
     const scoreEl = document.getElementById('score');
     const bulletsEl = document.getElementById('bullets');
     const healthEl = document.getElementById('health');
+    const livesEl = document.getElementById('lives');
     const levelEl = document.getElementById('level');
     const progressEl = document.getElementById('progress');
     const levelGoalEl = document.getElementById('levelGoal');
@@ -181,7 +183,9 @@
     const bulletsPerReload = 10;
     let bullets = bulletsPerReload;
     let health = 100;
+    let lives = 3;
     const heartSpawnInterval = 5; // seconds between heart drops
+
     let mouseX = canvas.width / 2;
     let mouseY = canvas.height / 2;
     let targets = [];      // Level-1 (3D) enemies
@@ -361,14 +365,21 @@
     }
 
     function updateUI() {
+      if (health <= 0 && lives > 0) {
+        lives--;
+        if (lives > 0) {
+          health = 100;
+        } else if (gameRunning) {
+          gameOver();
+        }
+      }
       scoreEl.textContent = score;
       bulletsEl.textContent = bullets;
       healthEl.textContent = Math.max(0, health);
+      livesEl.innerHTML = '❤️'.repeat(lives);
       levelEl.textContent = level;
       progressEl.textContent = correctThisLevel;
       levelGoalEl.textContent = levelGoal;
-
-      if (health <= 0 && gameRunning) gameOver();
     }
     function opForLevel(lvl) { return levelOps[lvl].sym; }
 
@@ -456,6 +467,7 @@
       score = 0;
       bullets = bulletsPerReload;
       health = 100;
+      lives = 3;
       targets = [];
       explosions = [];
       hearts = [];
