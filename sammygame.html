@@ -76,6 +76,27 @@
       font-weight:bold; display:none; text-shadow:0 0 10px #00ffcc; z-index:5;
     }
 
+    #shopScreen {
+      border:3px solid #ffaa33; color:#ffaa33; box-shadow:0 0 30px #ffaa33;
+      display:flex; flex-direction:column; align-items:center; gap:8px;
+    }
+    #shopScreen h2 { margin-top:0; margin-bottom:12px; }
+    #shopScreen #shopCoins { align-self:flex-start; }
+    #shopScreen #shopItems { margin:14px 0; display:flex; flex-direction:column; gap:10px; width:100%; max-width:360px; }
+    #shopScreen button { background:#ffaa33; color:#000; border:none; padding:12px 20px; font-size:16px; cursor:pointer; font-weight:bold; }
+    #shopScreen > button { align-self:center; margin-top:8px; }
+    #shopScreen button:disabled { background:#553300; color:#aa8855; cursor:not-allowed; }
+    #shopScreen .item {
+      border:2px solid #ffaa33; padding:10px; background:rgba(0,0,0,0.6); text-align:left; display:flex; flex-direction:column; gap:6px;
+    }
+    #shopScreen .item header { display:flex; justify-content:space-between; align-items:center; font-weight:bold; }
+    #shopScreen .item p { margin:0; font-size:14px; color:#ffddaa; }
+
+    #ui button.small {
+      background:#ff3333; color:#fff; border:none; padding:4px 10px; font-size:14px; cursor:pointer; font-weight:bold;
+    }
+    #ui button.small:hover { background:#ff5555; }
+
     /* Subtle hide crosshair on 2D ship levels; we toggle a class on <body> */
     body.ship-mode { cursor:none; }
   </style>
@@ -94,10 +115,16 @@
   <div id="ui">
     <div class="row">Score: <span id="score">0</span></div>
     <div class="row">Bullets: <span id="bullets">10</span></div>
+    <div class="row">Coins: <span id="coins">0</span></div>
     <div class="row">Health: <span id="health">100</span></div>
     <div class="row">Lives: <span id="lives">❤️❤️❤️</span></div>
     <div class="row">Level: <span id="level">1</span>/4</div>
     <div class="row">Progress: <span id="progress">0</span>/<span id="levelGoal">0</span></div>
+    <div class="row">Weapon: <span id="weaponName">Basic Blaster</span></div>
+    <div class="row" id="nukeRow" style="display:none; gap:6px; align-items:center;">
+      Nukes: <span id="nukeCount">0</span>
+      <button id="useNukeBtn" class="small">Detonate</button>
+    </div>
     <div class="row">
       <label for="speedSlider">Speed</label>
       <input type="range" id="speedSlider" min="0.25" max="2" step="0.05" value="0.50">
@@ -133,6 +160,13 @@
 
   <div id="levelBanner"></div>
 
+  <div id="shopScreen" class="overlay">
+    <h2>SUPPLY SHOP</h2>
+    <div id="shopCoins">Coins: 0</div>
+    <div id="shopItems"></div>
+    <button id="shopContinueBtn">Continue</button>
+  </div>
+
   <script>
     // ===== Canvas setup =====
     const canvas = document.getElementById('gameCanvas');
@@ -154,11 +188,16 @@
     // ===== UI elements =====
     const scoreEl = document.getElementById('score');
     const bulletsEl = document.getElementById('bullets');
+    const coinsEl = document.getElementById('coins');
     const healthEl = document.getElementById('health');
     const livesEl = document.getElementById('lives');
     const levelEl = document.getElementById('level');
     const progressEl = document.getElementById('progress');
     const levelGoalEl = document.getElementById('levelGoal');
+    const weaponNameEl = document.getElementById('weaponName');
+    const nukeRow = document.getElementById('nukeRow');
+    const nukeCountEl = document.getElementById('nukeCount');
+    const useNukeBtn = document.getElementById('useNukeBtn');
     const speedSlider = document.getElementById('speedSlider');
     const speedLabel = document.getElementById('speedLabel');
     const mathPrompt = document.getElementById('mathPrompt');
@@ -177,14 +216,25 @@
     const startBtn = document.getElementById('startBtn');
     const pauseScreen = document.getElementById('pauseScreen');
     const resumeBtn = document.getElementById('resumeBtn');
+    const shopScreen = document.getElementById('shopScreen');
+    const shopCoinsEl = document.getElementById('shopCoins');
+    const shopItemsEl = document.getElementById('shopItems');
+    const shopContinueBtn = document.getElementById('shopContinueBtn');
 
     // ===== Game state =====
     let score = 0;
     const bulletsPerReload = 10;
     let bullets = bulletsPerReload;
+    let coins = 0;
     let health = 100;
     let lives = 3;
     const heartSpawnInterval = 5; // seconds between heart drops
+    const coinsPerLevel = 10;
+
+    let currentWeapon = 'blaster';
+    const ownedWeapons = new Set(['blaster']);
+    let nukeCount = 0;
+    let pendingLevel = null;
 
     let mouseX = canvas.width / 2;
     let mouseY = canvas.height / 2;
@@ -224,8 +274,97 @@
       1: { sym: '+', name: 'Addition' },
       2: { sym: '−', name: 'Subtraction' },
       3: { sym: '×', name: 'Multiplication' },
-      4: { sym: '÷', name: 'Division' }
+      4: { sym: '×', name: 'Galactic Multiplication' }
     };
+
+    const weaponCatalog = {
+      blaster: {
+        id: 'blaster',
+        name: 'Basic Blaster',
+        cost: 0,
+        bulletCost: 1,
+        description: 'Reliable single-shot laser.',
+        hitscanShots: (x, y) => [{ x, y, pierce: 1 }],
+        projectiles: (player) => [new Bullet({ x: player.x, y: player.y + (player.bulletDir > 0 ? 12 : -12), dir: player.bulletDir })]
+      },
+      rifle: {
+        id: 'rifle',
+        name: 'Plasma Rifle',
+        cost: 20,
+        bulletCost: 1,
+        description: 'Piercing beam slices through two enemies.',
+        hitscanShots: (x, y) => [{ x, y, pierce: 2 }],
+        projectiles: (player) => [new Bullet({ x: player.x, y: player.y + (player.bulletDir > 0 ? 12 : -12), dir: player.bulletDir, speed: 820, r: 3, damage: 2 })]
+      },
+      shotgun: {
+        id: 'shotgun',
+        name: 'Scatter Shotgun',
+        cost: 30,
+        bulletCost: 3,
+        description: 'Three bolt spread. Eats extra ammo but melts crowds.',
+        hitscanShots: (x, y) => [
+          { x: x - 25, y: y - 20, pierce: 1 },
+          { x, y, pierce: 1 },
+          { x: x + 25, y: y - 20, pierce: 1 }
+        ],
+        projectiles: (player) => {
+          const baseY = player.y + (player.bulletDir > 0 ? 12 : -12);
+          return [
+            new Bullet({ x: player.x - 18, y: baseY, dir: player.bulletDir, vx: -180, damage: 1, speed: 560, r: 3.5 }),
+            new Bullet({ x: player.x, y: baseY, dir: player.bulletDir, vx: 0, damage: 1, speed: 560, r: 3.5 }),
+            new Bullet({ x: player.x + 18, y: baseY, dir: player.bulletDir, vx: 180, damage: 1, speed: 560, r: 3.5 })
+          ];
+        }
+      },
+      x2boomgun: {
+        id: 'x2boomgun',
+        name: 'X2 Boomgun',
+        cost: 45,
+        bulletCost: 2,
+        description: 'Sniper laser fires twin super-charged bolts.',
+        hitscanShots: (x, y) => [
+          { x, y, pierce: 2 },
+          { x, y, pierce: 2 }
+        ],
+        projectiles: (player) => {
+          const baseY = player.y + (player.bulletDir > 0 ? 10 : -10);
+          return [
+            new Bullet({ x: player.x - 6, y: baseY, dir: player.bulletDir, speed: 980, r: 3, damage: 2 }),
+            new Bullet({ x: player.x + 6, y: baseY, dir: player.bulletDir, speed: 980, r: 3, damage: 2 })
+          ];
+        }
+      },
+      minigun: {
+        id: 'minigun',
+        name: 'Mini Gun / Machinegun',
+        cost: 60,
+        bulletCost: 2,
+        description: 'Machinegun stream of bolts. Great for screens full of foes.',
+        hitscanShots: (x, y) => [
+          { x: x - 18, y, pierce: 1 },
+          { x: x - 4, y: y - 8, pierce: 1 },
+          { x: x + 4, y: y + 8, pierce: 1 },
+          { x: x + 18, y, pierce: 1 }
+        ],
+        projectiles: (player) => {
+          const baseY = player.y + (player.bulletDir > 0 ? 10 : -10);
+          return [
+            new Bullet({ x: player.x - 18, y: baseY, dir: player.bulletDir, vx: -120, damage: 1, speed: 760, r: 3 }),
+            new Bullet({ x: player.x - 6, y: baseY, dir: player.bulletDir, vx: -30, damage: 1, speed: 760, r: 3 }),
+            new Bullet({ x: player.x + 6, y: baseY, dir: player.bulletDir, vx: 30, damage: 1, speed: 760, r: 3 }),
+            new Bullet({ x: player.x + 18, y: baseY, dir: player.bulletDir, vx: 120, damage: 1, speed: 760, r: 3 })
+          ];
+        }
+      }
+    };
+
+    const shopItems = [
+      weaponCatalog.rifle,
+      weaponCatalog.shotgun,
+      weaponCatalog.x2boomgun,
+      weaponCatalog.minigun,
+      { id: 'nuke', name: 'Omega Nuke', cost: 100, description: 'Instantly vaporizes everything on screen.', type: 'nuke' }
+    ];
 
     // Hardcoded question sets for each level
     const levelQuestions = {
@@ -298,26 +437,18 @@
         { a:12, b:12, op:'×', answer:144 }
       ],
       4: [
-        { a:36, b:6, op:'÷', answer:6 },
-        { a:42, b:6, op:'÷', answer:7 },
-        { a:42, b:7, op:'÷', answer:6 },
-        { a:48, b:6, op:'÷', answer:8 },
-        { a:48, b:8, op:'÷', answer:6 },
-        { a:49, b:7, op:'÷', answer:7 },
-        { a:54, b:6, op:'÷', answer:9 },
-        { a:54, b:9, op:'÷', answer:6 },
-        { a:56, b:7, op:'÷', answer:8 },
-        { a:56, b:8, op:'÷', answer:7 },
-        { a:63, b:7, op:'÷', answer:9 },
-        { a:63, b:9, op:'÷', answer:7 },
-        { a:64, b:8, op:'÷', answer:8 },
-        { a:72, b:8, op:'÷', answer:9 },
-        { a:72, b:9, op:'÷', answer:8 },
-        { a:81, b:9, op:'÷', answer:9 },
-        { a:84, b:7, op:'÷', answer:12 },
-        { a:84, b:12, op:'÷', answer:7 },
-        { a:96, b:8, op:'÷', answer:12 },
-        { a:96, b:12, op:'÷', answer:8 }
+        { a:11, b:11, op:'×', answer:121 },
+        { a:11, b:12, op:'×', answer:132 },
+        { a:12, b:12, op:'×', answer:144 },
+        { a:13, b:11, op:'×', answer:143 },
+        { a:13, b:12, op:'×', answer:156 },
+        { a:14, b:11, op:'×', answer:154 },
+        { a:14, b:12, op:'×', answer:168 },
+        { a:15, b:11, op:'×', answer:165 },
+        { a:15, b:12, op:'×', answer:180 },
+        { a:16, b:11, op:'×', answer:176 },
+        { a:16, b:12, op:'×', answer:192 },
+        { a:18, b:11, op:'×', answer:198 }
       ]
     };
 
@@ -383,11 +514,16 @@
       }
       scoreEl.textContent = score;
       bulletsEl.textContent = bullets;
+      coinsEl.textContent = coins;
       healthEl.textContent = Math.max(0, health);
       livesEl.innerHTML = '❤️'.repeat(lives);
       levelEl.textContent = level;
       progressEl.textContent = correctThisLevel;
       levelGoalEl.textContent = levelGoal;
+      const weapon = weaponCatalog[currentWeapon];
+      weaponNameEl.textContent = weapon ? weapon.name : 'Unknown';
+      nukeCountEl.textContent = nukeCount;
+      nukeRow.style.display = nukeCount > 0 ? 'flex' : 'none';
     }
     function opForLevel(lvl) { return levelOps[lvl].sym; }
 
@@ -436,12 +572,16 @@
         updateUI();
 
         // Handle level advance or boss spawn
+        let triggeredShop = false;
         if (correctThisLevel >= levelGoal) {
           if (level < maxLevel) {
-            level++;
+            coins += coinsPerLevel;
+            const nextLevel = level + 1;
+            level = nextLevel;
             correctThisLevel = 0;
-            configureLevel(level);
-            showBanner(`Level ${level}: ${levelOps[level].name}`);
+            pendingLevel = nextLevel;
+            levelGoal = levelQuestions[nextLevel].length;
+            triggeredShop = true;
           } else {
             // Level 4: gate by boss. If not spawned, spawn now.
             if (!boss) spawnBoss();
@@ -450,6 +590,12 @@
 
         mathPrompt.style.display = 'none';
         isReloading = false;
+
+        if (triggeredShop) {
+          updateUI();
+          openShop();
+          return;
+        }
       } else {
         mathAnswerEl.style.borderColor = '#ff0000';
         setTimeout(() => {
@@ -474,6 +620,7 @@
     function restartGame() {
       score = 0;
       bullets = bulletsPerReload;
+      coins = 0;
       health = 100;
       lives = 3;
       targets = [];
@@ -489,12 +636,18 @@
       isPaused = false;
       level = 1;
       correctThisLevel = 0;
+      currentWeapon = 'blaster';
+      ownedWeapons.clear();
+      ownedWeapons.add('blaster');
+      nukeCount = 0;
+      pendingLevel = null;
       for (let k in questionIndex) questionIndex[k] = 0;
       lastTime = 0;
       gameOverEl.style.display = 'none';
       youWinEl.style.display = 'none';
       mathPrompt.style.display = 'none';
       pauseScreen.style.display = 'none';
+      shopScreen.style.display = 'none';
       syncSpeedFromSlider();
       configureLevel(1);
       updateUI();
@@ -730,14 +883,19 @@
     }
 
     class Bullet {
-      constructor(x, y, dir) {
-        this.x = x; this.y = y; this.dir = dir; // -1 up, +1 down
-        this.speed = currentMode === Modes.JELLIES ? 200 : 620;
-        this.r = currentMode === Modes.JELLIES ? 6 : 3.5;
+      constructor({ x, y, dir, speed, r, damage, vx }) {
+        this.x = x;
+        this.y = y;
+        this.dir = dir; // -1 up, +1 down
+        this.speed = speed ?? (currentMode === Modes.JELLIES ? 200 : 620);
+        this.r = r ?? (currentMode === Modes.JELLIES ? 6 : 3.5);
+        this.damage = damage ?? 1;
+        this.vx = vx ?? 0;
       }
       update(deltaSec) {
+        this.x += this.vx * deltaSec;
         this.y += this.dir * this.speed * deltaSec; // bullets ignore slow-mo
-        return (this.y > -20 && this.y < canvas.height + 20);
+        return (this.y > -40 && this.y < canvas.height + 40 && this.x > -40 && this.x < canvas.width + 40);
       }
       draw() {
         if (currentMode === Modes.JELLIES) {
@@ -1037,7 +1195,7 @@
             for (let i=0;i<projectiles.length;i++){
               const b = projectiles[i];
               if (en.hitTest(b.x, b.y, b.r)) {
-                en.hp--; score += 25; // per-hit score
+                en.hp -= b.damage ?? 1; score += 25; // per-hit score
                 projectiles.splice(i,1);
                 explosions.push(new Explosion(en.x || en.x0 || b.x, en.y || b.y));
                 break;
@@ -1055,7 +1213,7 @@
               for (let i=0;i<projectiles.length;i++){
                 const b = projectiles[i];
                 if (boss.hitTest(b.x, b.y, b.r)) {
-                  boss.hp--; score += 40;
+                  boss.hp -= b.damage ?? 1; score += 40;
                   projectiles.splice(i,1);
                   explosions.push(new Explosion(boss.x, boss.y));
                   break;
@@ -1116,6 +1274,156 @@
     }
 
     // ===== Events =====
+    function fireHitscanShots(shots) {
+      if (!Array.isArray(shots)) return;
+      shots.forEach(shot => {
+        let remaining = shot && shot.pierce ? shot.pierce : 1;
+        if (!shot) return;
+
+        if (hearts.length) {
+          for (let i = hearts.length - 1; i >= 0; i--) {
+            if (hearts[i].hitTest(shot.x, shot.y)) {
+              hearts.splice(i, 1);
+              health = Math.min(100, health + 10);
+              updateUI();
+              remaining = 0;
+              break;
+            }
+          }
+        }
+
+        while (remaining > 0) {
+          const sorted = [...targets].sort((a, b) => a.z - b.z);
+          let hit = false;
+          for (let t of sorted) {
+            if (t.checkHit(shot.x, shot.y)) {
+              score += Math.floor(100 / t.z * 10);
+              explosions.push(new Explosion(shot.x, shot.y));
+              const idx = targets.indexOf(t);
+              if (idx !== -1) targets.splice(idx, 1);
+              updateUI();
+              remaining--;
+              hit = true;
+              break;
+            }
+          }
+          if (!hit) break;
+        }
+      });
+    }
+
+    function activateNuke() {
+      if (!gameRunning || nukeCount <= 0) return;
+      nukeCount--;
+      const blastCount = 12;
+      for (let i = 0; i < blastCount; i++) {
+        const exX = Math.random() * canvas.width;
+        const exY = Math.random() * canvas.height;
+        explosions.push(new Explosion(exX, exY));
+      }
+      targets = [];
+      enemies2D = [];
+      projectiles = [];
+      hearts = [];
+      if (boss) { boss.hp = 0; }
+      updateUI();
+    }
+
+    function purchaseItem(item) {
+      if (!item) return;
+      if (item.type === 'nuke') {
+        if (coins < item.cost) return;
+        coins -= item.cost;
+        nukeCount++;
+        updateUI();
+        renderShop();
+        return;
+      }
+
+      if (ownedWeapons.has(item.id) || coins < item.cost) return;
+      coins -= item.cost;
+      ownedWeapons.add(item.id);
+      currentWeapon = item.id;
+      updateUI();
+      renderShop();
+    }
+
+    function equipWeapon(id) {
+      if (!ownedWeapons.has(id)) return;
+      currentWeapon = id;
+      updateUI();
+      renderShop();
+    }
+
+    function renderShop() {
+      shopCoinsEl.textContent = `Coins: ${coins}`;
+      shopItemsEl.innerHTML = '';
+      shopItems.forEach(item => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'item';
+        const header = document.createElement('header');
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = item.name;
+        const costSpan = document.createElement('span');
+        costSpan.textContent = `${item.cost} coins`;
+        header.appendChild(nameSpan);
+        header.appendChild(costSpan);
+        const desc = document.createElement('p');
+        desc.textContent = item.description;
+        const btn = document.createElement('button');
+
+        if (item.type === 'nuke') {
+          btn.textContent = 'Buy Nuke';
+          btn.disabled = coins < item.cost;
+          btn.addEventListener('click', () => purchaseItem(item));
+        } else {
+          const owned = ownedWeapons.has(item.id);
+          if (!owned) {
+            btn.textContent = `Buy for ${item.cost}`;
+            btn.disabled = coins < item.cost;
+            btn.addEventListener('click', () => purchaseItem(item));
+          } else if (currentWeapon === item.id) {
+            btn.textContent = 'Equipped';
+            btn.disabled = true;
+          } else {
+            btn.textContent = 'Equip';
+            btn.disabled = false;
+            btn.addEventListener('click', () => equipWeapon(item.id));
+          }
+        }
+
+        wrapper.appendChild(header);
+        wrapper.appendChild(desc);
+        wrapper.appendChild(btn);
+        shopItemsEl.appendChild(wrapper);
+      });
+    }
+
+    function openShop() {
+      gameRunning = false;
+      isPaused = false;
+      pauseScreen.style.display = 'none';
+      mathPrompt.style.display = 'none';
+      isReloading = false;
+      renderShop();
+      shopScreen.style.display = 'block';
+    }
+
+    function closeShop() {
+      shopScreen.style.display = 'none';
+      if (pendingLevel) {
+        configureLevel(pendingLevel);
+        bullets = bulletsPerReloadForLevel(pendingLevel);
+        correctThisLevel = 0;
+        updateUI();
+        showBanner(`Level ${pendingLevel}: ${levelOps[pendingLevel].name}`);
+        pendingLevel = null;
+      } else {
+        updateUI();
+      }
+      gameRunning = true;
+    }
+
     canvas.addEventListener('mousemove', (e) => {
       mouseX = e.clientX; mouseY = e.clientY;
       if (currentMode !== Modes.CANYON) { player.x = e.clientX; clampPlayer(); }
@@ -1124,33 +1432,18 @@
     // Shooting
     function tryShoot() {
       if (!gameRunning || isReloading) return;
-      if (bullets <= 0) { showMathPrompt(); return; }
-      bullets--; updateUI();
+      const weapon = weaponCatalog[currentWeapon] || weaponCatalog.blaster;
+      const bulletCost = weapon.bulletCost ?? 1;
+      if (bullets < bulletCost) { showMathPrompt(); return; }
+      bullets -= bulletCost;
+      updateUI();
 
       if (currentMode === Modes.CANYON) {
-        // hearts first
-        for (let i=0;i<hearts.length;i++) {
-          if (hearts[i].hitTest(mouseX, mouseY)) {
-            hearts.splice(i,1);
-            health = Math.min(100, health + 10);
-            updateUI();
-            return;
-          }
-        }
-        // hitscan near-to-far
-        const sorted = [...targets].sort((a, b) => a.z - b.z);
-        for (let t of sorted) {
-          if (t.checkHit(mouseX, mouseY)) {
-            score += Math.floor(100 / t.z * 10);
-            explosions.push(new Explosion(mouseX, mouseY));
-            targets.splice(targets.indexOf(t), 1);
-            updateUI();
-            break;
-          }
-        }
+        const shots = weapon.hitscanShots ? weapon.hitscanShots(mouseX, mouseY) : [{ x: mouseX, y: mouseY, pierce: 1 }];
+        fireHitscanShots(shots);
       } else {
-        // projectile from ship
-        projectiles.push(new Bullet(player.x, player.y + (player.bulletDir>0?12:-12), player.bulletDir));
+        const projs = weapon.projectiles ? weapon.projectiles(player) : [new Bullet({ x: player.x, y: player.y + (player.bulletDir > 0 ? 12 : -12), dir: player.bulletDir })];
+        projs.forEach(p => projectiles.push(p));
       }
 
       if (bullets === 0) showMathPrompt();
@@ -1165,6 +1458,8 @@
     restartBtn2.addEventListener('click', () => { startScreen.style.display='none'; restartGame(); });
 
     resumeBtn.addEventListener('click', togglePause);
+    useNukeBtn.addEventListener('click', activateNuke);
+    shopContinueBtn.addEventListener('click', closeShop);
 
     speedSlider.addEventListener('input', () => { syncSpeedFromSlider(); });
 
@@ -1176,6 +1471,7 @@
       if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') player.moveRight = true;
       if (e.key === ' ' ) { e.preventDefault(); tryShoot(); }
       if ((e.key === 'p' || e.key === 'P') && !e.repeat) togglePause();
+      if ((e.key === 'n' || e.key === 'N') && !e.repeat) activateNuke();
       if (!gameRunning && e.key === 'Enter' && startScreen.style.display !== 'none') startBtn.click();
     });
     window.addEventListener('keyup', (e) => {
