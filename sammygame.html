@@ -230,6 +230,8 @@
     let lives = 3;
     const heartSpawnInterval = 5; // seconds between heart drops
     const coinsPerLevel = 10;
+    const coinChestReward = { min: 5, max: 50 };
+    const coinChestSpawnRates = { canyon: 0.12, twoD: 0.10 };
 
     let currentWeapon = 'blaster';
     const ownedWeapons = new Set(['blaster']);
@@ -241,6 +243,8 @@
     let targets = [];      // Level-1 (3D) enemies
     let explosions = [];
     let hearts = [];
+    let coinChests3D = [];
+    let coinChests2D = [];
     let heartSpawnActive = false;
     let heartSpawnTimer = 0;
     let currentMathProblem = null;
@@ -437,18 +441,24 @@
         { a:12, b:12, op:'×', answer:144 }
       ],
       4: [
+        { a:4, b:11, op:'×', answer:44 },
+        { a:4, b:12, op:'×', answer:48 },
+        { a:5, b:11, op:'×', answer:55 },
+        { a:5, b:12, op:'×', answer:60 },
+        { a:6, b:11, op:'×', answer:66 },
+        { a:6, b:12, op:'×', answer:72 },
+        { a:7, b:11, op:'×', answer:77 },
+        { a:7, b:12, op:'×', answer:84 },
+        { a:8, b:11, op:'×', answer:88 },
+        { a:8, b:12, op:'×', answer:96 },
+        { a:9, b:11, op:'×', answer:99 },
+        { a:9, b:12, op:'×', answer:108 },
+        { a:10, b:11, op:'×', answer:110 },
+        { a:10, b:12, op:'×', answer:120 },
         { a:11, b:11, op:'×', answer:121 },
         { a:11, b:12, op:'×', answer:132 },
-        { a:12, b:12, op:'×', answer:144 },
-        { a:13, b:11, op:'×', answer:143 },
-        { a:13, b:12, op:'×', answer:156 },
-        { a:14, b:11, op:'×', answer:154 },
-        { a:14, b:12, op:'×', answer:168 },
-        { a:15, b:11, op:'×', answer:165 },
-        { a:15, b:12, op:'×', answer:180 },
-        { a:16, b:11, op:'×', answer:176 },
-        { a:16, b:12, op:'×', answer:192 },
-        { a:18, b:11, op:'×', answer:198 }
+        { a:12, b:11, op:'×', answer:132 },
+        { a:12, b:12, op:'×', answer:144 }
       ]
     };
 
@@ -524,6 +534,13 @@
       weaponNameEl.textContent = weapon ? weapon.name : 'Unknown';
       nukeCountEl.textContent = nukeCount;
       nukeRow.style.display = nukeCount > 0 ? 'flex' : 'none';
+    }
+    function grantChestCoins(x, y) {
+      const reward = randInt(coinChestReward.min, coinChestReward.max);
+      coins += reward;
+      updateUI();
+      explosions.push(new Explosion(x, y));
+      showBanner(`Loot Chest: +${reward} coins!`, 1100);
     }
     function opForLevel(lvl) { return levelOps[lvl].sym; }
 
@@ -626,6 +643,8 @@
       targets = [];
       explosions = [];
       hearts = [];
+      coinChests3D = [];
+      coinChests2D = [];
       heartSpawnActive = false;
       heartSpawnTimer = 0;
       enemies2D = [];
@@ -937,6 +956,89 @@
       hitTest(px, py, pr=0) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
     }
 
+    class CoinChest3D {
+      constructor(params) {
+        this.z = params.zStart;
+        this.x = (Math.random() - 0.5) * 180;
+        this.y = (Math.random() - 0.5) * 90;
+        this.baseSpeed = randRange(params.speedRange[0] * 0.65, params.speedRange[1] * 0.85);
+        this.size = 24;
+      }
+      update(dt) {
+        this.z -= this.baseSpeed * speedMultiplier * dt;
+        return this.z > 1.2;
+      }
+      getScreenCoords() {
+        const scale = 200 / Math.max(1.2, this.z);
+        const screenX = vanishingPoint.x + (this.x * scale);
+        const screenY = vanishingPoint.y + (this.y * scale);
+        const screenSize = this.size * scale;
+        return { x: screenX, y: screenY, size: screenSize };
+      }
+      draw() {
+        const c = this.getScreenCoords();
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.shadowColor = '#ffd966'; ctx.shadowBlur = c.size * 0.5;
+        ctx.fillStyle = '#a6692a';
+        const boxW = c.size * 1.4;
+        const boxH = c.size * 0.9;
+        ctx.fillRect(-boxW/2, -boxH/2, boxW, boxH);
+        ctx.fillStyle = '#d48836';
+        ctx.fillRect(-boxW/2, -boxH*0.2, boxW, boxH*0.4);
+        ctx.fillStyle = '#ffd966';
+        ctx.fillRect(-4, -boxH/2, 8, boxH);
+        ctx.strokeStyle = '#ffd966'; ctx.lineWidth = 2;
+        ctx.strokeRect(-boxW/2, -boxH/2, boxW, boxH);
+        ctx.restore();
+      }
+      checkHit(x, y) {
+        const c = this.getScreenCoords();
+        const dx = Math.abs(x - c.x);
+        const dy = Math.abs(y - c.y);
+        return dx < c.size * 0.8 && dy < c.size * 0.6;
+      }
+    }
+
+    class CoinChest2D {
+      constructor(mode) {
+        this.mode = mode;
+        this.x = randInt(40, canvas.width - 40);
+        this.radius = 20;
+        if (mode === Modes.JELLIES) {
+          this.y = canvas.height + 40;
+          this.vy = -randRange(70, 110);
+        } else {
+          this.y = -40;
+          this.vy = randRange(70, 110);
+        }
+      }
+      update(deltaSec) {
+        this.y += this.vy * speedMultiplier * deltaSec;
+        if (this.mode === Modes.JELLIES) {
+          return this.y > -60;
+        }
+        return this.y < canvas.height + 60;
+      }
+      draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.shadowColor = '#ffd966'; ctx.shadowBlur = 18;
+        ctx.fillStyle = '#a6692a';
+        ctx.fillRect(-22, -16, 44, 28);
+        ctx.fillStyle = '#d48836';
+        ctx.fillRect(-22, -4, 44, 12);
+        ctx.fillStyle = '#ffd966';
+        ctx.fillRect(-4, -16, 8, 28);
+        ctx.strokeStyle = '#ffd966'; ctx.lineWidth = 2;
+        ctx.strokeRect(-22, -16, 44, 28);
+        ctx.restore();
+      }
+      hitTest(px, py, pr=0) {
+        return Math.hypot(this.x - px, this.y - py) < (this.radius + pr);
+      }
+    }
+
     // ---- Enemy types for 2D modes ----
     class Bat {
       constructor() {
@@ -1150,9 +1252,27 @@
           const spawnProb = 1 - Math.exp(-lambda * deltaSec);
           if (Math.random() < spawnProb) targets.push(new Target(lp));
 
+          const chestLambda = coinChestSpawnRates.canyon * reloadFactor * speedMultiplier;
+          const chestProb = 1 - Math.exp(-chestLambda * deltaSec);
+          if (Math.random() < chestProb) coinChests3D.push(new CoinChest3D(lp));
+
           // Draw far-to-near (bigger z first)
-          targets.sort((a, b) => b.z - a.z);
-          targets = targets.filter(t => { const alive = t.update(dt); if (alive) t.draw(); return alive; });
+          const combined = [
+            ...targets.map(entity => ({ entity, type: 'target' })),
+            ...coinChests3D.map(entity => ({ entity, type: 'chest' }))
+          ];
+          combined.sort((a, b) => b.entity.z - a.entity.z);
+          const newTargets = [];
+          const newChests = [];
+          combined.forEach(item => {
+            const alive = item.entity.update(dt);
+            if (!alive) return;
+            item.entity.draw();
+            if (item.type === 'target') newTargets.push(item.entity);
+            else newChests.push(item.entity);
+          });
+          targets = newTargets;
+          coinChests3D = newChests;
           explosions = explosions.filter(ex => { const alive = ex.update(dt); if (alive) ex.draw(); return alive; });
 
         } else {
@@ -1164,6 +1284,10 @@
           const lambda = spawnPerSec * reloadFactor * speedMultiplier;
           const spawnProb = 1 - Math.exp(-lambda * deltaSec);
 
+          const chestLambda = coinChestSpawnRates.twoD * reloadFactor * speedMultiplier;
+          const chestProb = 1 - Math.exp(-chestLambda * deltaSec);
+          if (Math.random() < chestProb) coinChests2D.push(new CoinChest2D(currentMode));
+
           if (!boss) { // while boss alive we stop adding more aliens
             if (Math.random() < spawnProb) {
               if (currentMode === Modes.BATS) enemies2D.push(new Bat());
@@ -1171,6 +1295,22 @@
               else if (currentMode === Modes.ALIENS) enemies2D.push(new Alien());
             }
           }
+
+          coinChests2D = coinChests2D.filter(ch => {
+            if (ch.mode !== currentMode) return false;
+            const alive = ch.update(deltaSec);
+            if (!alive) return false;
+            ch.draw();
+            for (let i=0;i<projectiles.length;i++) {
+              const b = projectiles[i];
+              if (ch.hitTest(b.x, b.y, b.r)) {
+                projectiles.splice(i,1);
+                grantChestCoins(ch.x, ch.y);
+                return false;
+              }
+            }
+            return true;
+          });
 
           // Player motion (keyboard or mouse X) — ship speed is not slowed
           const move = (player.moveRight ? 1 : 0) - (player.moveLeft ? 1 : 0);
@@ -1292,6 +1432,19 @@
           }
         }
 
+        if (remaining > 0 && coinChests3D.length) {
+          for (let i = coinChests3D.length - 1; i >= 0; i--) {
+            const chest = coinChests3D[i];
+            if (chest.checkHit(shot.x, shot.y)) {
+              const coords = chest.getScreenCoords();
+              grantChestCoins(coords.x, coords.y);
+              coinChests3D.splice(i, 1);
+              remaining = 0;
+              break;
+            }
+          }
+        }
+
         while (remaining > 0) {
           const sorted = [...targets].sort((a, b) => a.z - b.z);
           let hit = false;
@@ -1325,6 +1478,8 @@
       enemies2D = [];
       projectiles = [];
       hearts = [];
+      coinChests3D = [];
+      coinChests2D = [];
       if (boss) { boss.hp = 0; }
       updateUI();
     }
@@ -1467,6 +1622,15 @@
 
     // Keyboard controls for ship levels
     window.addEventListener('keydown', (e) => {
+      if ((e.key === 'a' || e.key === 'A') && !e.repeat) {
+        if (gameRunning && shopScreen.style.display === 'none') {
+          e.preventDefault();
+          openShop();
+          player.moveLeft = false;
+          player.moveRight = false;
+          return;
+        }
+      }
       if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') player.moveLeft = true;
       if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') player.moveRight = true;
       if (e.key === ' ' ) { e.preventDefault(); tryShoot(); }
@@ -1510,6 +1674,8 @@
         player.topMode = false; player.bulletDir = -1; clampPlayer();
         initStars();
       }
+      coinChests3D = [];
+      coinChests2D = [];
       shuffleQuestionsForLevel(lvl);
       questionIndex[lvl] = 0;
       levelGoal = levelQuestions[lvl].length;
