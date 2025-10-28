@@ -855,6 +855,28 @@
       const x = player.x, y = player.y, s = 18;
       ctx.save();
 
+      if (currentWeapon === 'x2boomgun') {
+        const dir = player.bulletDir;
+        const startY = dir < 0 ? y - s * 0.9 : y + s * 0.9;
+        const endY = dir < 0 ? 24 : canvas.height - 24;
+        const guide = ctx.createLinearGradient(x, startY, x, endY);
+        if (dir < 0) {
+          guide.addColorStop(0, 'rgba(120, 255, 255, 0.65)');
+          guide.addColorStop(1, 'rgba(120, 255, 255, 0)');
+        } else {
+          guide.addColorStop(0, 'rgba(120, 255, 255, 0)');
+          guide.addColorStop(1, 'rgba(120, 255, 255, 0.65)');
+        }
+        ctx.strokeStyle = guide;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 14]);
+        ctx.beginPath();
+        ctx.moveTo(x, startY);
+        ctx.lineTo(x, endY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
       if (currentMode === Modes.JELLIES) {
         // Water background under the ship
         const waterTop = y + s * 0.9;
