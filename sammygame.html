@@ -247,6 +247,7 @@
     let coinChests2D = [];
     let heartSpawnActive = false;
     let heartSpawnTimer = 0;
+    let boomgunAim = null;
     let currentMathProblem = null;
     let isReloading = false;
     let gameRunning = false; // start on title screen
@@ -1425,6 +1426,7 @@
     }
 
     function drawCrosshair() {
+      boomgunAim = null;
       ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2; ctx.shadowColor = '#00ff00'; ctx.shadowBlur = 5;
       ctx.beginPath(); ctx.arc(mouseX, mouseY, 15, 0, Math.PI * 2); ctx.stroke();
       ctx.beginPath();
@@ -1433,9 +1435,56 @@
       ctx.moveTo(mouseX, mouseY - 20); ctx.lineTo(mouseX, mouseY - 10);
       ctx.moveTo(mouseX, mouseY + 10); ctx.lineTo(mouseX, mouseY + 20);
       ctx.stroke(); ctx.shadowBlur = 0;
+
+      if (currentWeapon === 'x2boomgun' && currentMode === Modes.CANYON && targets.length) {
+        let best = null;
+        let bestDist = Infinity;
+        for (const target of targets) {
+          const coords = target.getScreenCoords();
+          const dist = Math.hypot(mouseX - coords.x, mouseY - coords.y);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = { target, coords };
+          }
+        }
+
+        if (best) {
+          const { target, coords } = best;
+          const activationRadius = coords.size * 4 + 80;
+          if (bestDist <= activationRadius) {
+            boomgunAim = { target, x: coords.x, y: coords.y, size: coords.size };
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 60, 60, 0.95)';
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = '#ff3333';
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.moveTo(mouseX, mouseY);
+            ctx.lineTo(coords.x, coords.y);
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
+            ctx.lineWidth = 3;
+            const boxSize = coords.size * 2;
+            ctx.strokeRect(coords.x - coords.size, coords.y - coords.size, boxSize, boxSize);
+            ctx.restore();
+          }
+        }
+      }
     }
 
     // ===== Events =====
+    function destroyTarget(target, hitX, hitY) {
+      if (!target) return;
+      const idx = targets.indexOf(target);
+      if (idx === -1) return;
+      const scoreGain = Math.floor(100 / Math.max(1, target.z) * 10);
+      score += scoreGain;
+      explosions.push(new Explosion(hitX, hitY));
+      targets.splice(idx, 1);
+      updateUI();
+    }
+
     function fireHitscanShots(shots) {
       if (!Array.isArray(shots)) return;
       shots.forEach(shot => {
@@ -1472,11 +1521,7 @@
           let hit = false;
           for (let t of sorted) {
             if (t.checkHit(shot.x, shot.y)) {
-              score += Math.floor(100 / t.z * 10);
-              explosions.push(new Explosion(shot.x, shot.y));
-              const idx = targets.indexOf(t);
-              if (idx !== -1) targets.splice(idx, 1);
-              updateUI();
+              destroyTarget(t, shot.x, shot.y);
               remaining--;
               hit = true;
               break;
@@ -1616,6 +1661,9 @@
       updateUI();
 
       if (currentMode === Modes.CANYON) {
+        if (weapon.id === 'x2boomgun' && boomgunAim && targets.includes(boomgunAim.target)) {
+          destroyTarget(boomgunAim.target, boomgunAim.x, boomgunAim.y);
+        }
         const shots = weapon.hitscanShots ? weapon.hitscanShots(mouseX, mouseY) : [{ x: mouseX, y: mouseY, pierce: 1 }];
         fireHitscanShots(shots);
       } else {
