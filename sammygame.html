@@ -464,6 +464,7 @@
     };
 
     const questionIndex = { 1:0, 2:0, 3:0, 4:0 };
+    const levelGoalOverrides = { 2: 16 }; // shorten subtraction stage to 16 reloads
 
     function shuffleQuestionsForLevel(lvl) {
       const arr = levelQuestions[lvl];
@@ -1748,7 +1749,8 @@
       coinChests2D = [];
       shuffleQuestionsForLevel(lvl);
       questionIndex[lvl] = 0;
-      levelGoal = levelQuestions[lvl].length;
+      const overrideGoal = levelGoalOverrides[lvl];
+      levelGoal = overrideGoal ?? levelQuestions[lvl].length;
       levelEl.textContent = lvl;
       levelGoalEl.textContent = levelGoal;
       promptTitle.textContent = `RELOAD — Level ${lvl}: ${levelOps[lvl].name}`;
