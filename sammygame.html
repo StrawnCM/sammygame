@@ -245,6 +245,7 @@
     let hearts = [];
     let coinChests3D = [];
     let coinChests2D = [];
+    let bossDefeatFx = [];
     let heartSpawnActive = false;
     let heartSpawnTimer = 0;
     let boomgunAim = null;
@@ -258,6 +259,7 @@
     const maxLevel = 4;
     let levelGoal = 0; // correct answers needed per level (set in configureLevel)
     let correctThisLevel = 0;
+    let levelCleared = false;
 
     // Speed control (sync to slider at startup)
     let speedMultiplier = 1;
@@ -500,9 +502,14 @@
       ampRange: [40, 90],
       freqRange: [1.5, 2.8],
       hp: 1,
-      bossHP: 14,
-      bossSpeed: 120,
       touchDamage: 12
+    };
+
+    const bossConfigs = {
+      1: { hp: 10, speed: 90, color: '#ff77aa', glow: '#ffcc33', bar: '#ffdd66', size: 60, hoverY: 140 },
+      2: { hp: 12, speed: 110, color: '#66e0ff', glow: '#33ffaa', bar: '#7affc5', size: 64, hoverY: 120 },
+      3: { hp: 14, speed: 105, color: '#8df08d', glow: '#c0ff66', bar: '#a8ff7a', size: 70, hoverY: null },
+      4: { hp: 16, speed: 120, color: '#ffd54d', glow: '#ff3', bar: '#ff3', size: 72, hoverY: 120 }
     };
 
     function showBanner(text, ms=1200) {
@@ -569,9 +576,9 @@
       mathAnswerEl.focus();
     }
 
-    // Boss gate: on level 4, after you've hit the goal once, we spawn a boss and
-    // you must defeat it to win. Progress stays capped at levelGoal meanwhile.
-    let boss = null; // holds boss entity on level 4
+    // Boss gate: each level ends with a boss. Progress stays capped at levelGoal until
+    // the boss for that level is defeated.
+    let boss = null;
     
     function bulletsPerReloadForLevel(lvl) {
       return (lvl === 2) ? 15 : bulletsPerReload; // L2 gets 15, others keep default 10
@@ -585,36 +592,17 @@
       if (answer === currentMathProblem.answer) {
         questionIndex[level]++;
         bullets = bulletsPerReloadForLevel(level);
-        if (level !== 4 || !boss) { // while boss alive, don't add progress past goal
+        if (!boss && !levelCleared) { // while boss alive/cleared, don't add progress past goal
           correctThisLevel = Math.min(levelGoal, correctThisLevel + 1);
         }
         updateUI();
 
-        // Handle level advance or boss spawn
-        let triggeredShop = false;
-        if (correctThisLevel >= levelGoal) {
-          if (level < maxLevel) {
-            coins += coinsPerLevel;
-            const nextLevel = level + 1;
-            level = nextLevel;
-            correctThisLevel = 0;
-            pendingLevel = nextLevel;
-            levelGoal = levelQuestions[nextLevel].length;
-            triggeredShop = true;
-          } else {
-            // Level 4: gate by boss. If not spawned, spawn now.
-            if (!boss) spawnBoss();
-          }
+        if (correctThisLevel >= levelGoal && !boss && !levelCleared) {
+          spawnBoss(level);
         }
 
         mathPrompt.style.display = 'none';
         isReloading = false;
-
-        if (triggeredShop) {
-          updateUI();
-          openShop();
-          return;
-        }
       } else {
         mathAnswerEl.style.borderColor = '#ff0000';
         setTimeout(() => {
@@ -636,6 +624,33 @@
       youWinEl.style.display = 'block';
     }
 
+    function handleBossDefeated(defeatedLevel, x, y) {
+      levelCleared = true;
+      const cfg = bossConfigs[defeatedLevel] || bossConfigs[4];
+      bossDefeatFx.push(new BossDefeatAnimation(x, y, cfg));
+      targets = [];
+      enemies2D = [];
+      projectiles = [];
+      heartSpawnActive = false;
+
+      const delay = 900;
+      if (defeatedLevel >= maxLevel) {
+        setTimeout(() => winGame(), delay);
+      } else {
+        setTimeout(() => {
+          coins += coinsPerLevel;
+          const nextLevel = defeatedLevel + 1;
+          level = nextLevel;
+          correctThisLevel = 0;
+          pendingLevel = nextLevel;
+          const overrideGoal = levelGoalOverrides[nextLevel];
+          levelGoal = overrideGoal ?? levelQuestions[nextLevel].length;
+          updateUI();
+          openShop();
+        }, delay);
+      }
+    }
+
     function restartGame() {
       score = 0;
       bullets = bulletsPerReload;
@@ -647,6 +662,7 @@
       hearts = [];
       coinChests3D = [];
       coinChests2D = [];
+      bossDefeatFx = [];
       heartSpawnActive = false;
       heartSpawnTimer = 0;
       enemies2D = [];
@@ -657,6 +673,7 @@
       isPaused = false;
       level = 1;
       correctThisLevel = 0;
+      levelCleared = false;
       currentWeapon = 'blaster';
       ownedWeapons.clear();
       ownedWeapons.add('blaster');
@@ -779,6 +796,52 @@
           ctx.shadowColor = '#00ff00'; ctx.shadowBlur = 10;
           ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
         });
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    class BossDefeatAnimation {
+      constructor(x, y, cfg) {
+        this.x = x; this.y = y;
+        this.cfg = cfg;
+        this.time = 0;
+        this.duration = 1.25;
+        this.sparks = Array.from({length: 55}, () => ({
+          x, y,
+          vx: randRange(-220, 220),
+          vy: randRange(-120, 160),
+          life: randRange(0.6, 1),
+          size: randRange(2, 4)
+        }));
+      }
+      update(deltaSec) {
+        this.time += deltaSec;
+        this.sparks = this.sparks.filter(s => {
+          s.x += s.vx * deltaSec;
+          s.y += s.vy * deltaSec;
+          s.vy += 280 * deltaSec * 0.25;
+          s.life -= deltaSec * 0.6;
+          return s.life > 0;
+        });
+        return this.time < this.duration || this.sparks.length > 0;
+      }
+      draw() {
+        const progress = clamp(this.time / this.duration, 0, 1);
+        const ringRadius = 40 + progress * 160;
+        ctx.save();
+        ctx.strokeStyle = this.cfg.glow;
+        ctx.lineWidth = 6 * (1 - progress);
+        ctx.globalAlpha = 0.9 * (1 - progress);
+        ctx.beginPath(); ctx.arc(this.x, this.y, ringRadius, 0, Math.PI*2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(this.x, this.y, ringRadius * 0.6, 0, Math.PI*2); ctx.stroke();
+
+        this.sparks.forEach(s => {
+          ctx.globalAlpha = clamp(s.life, 0, 1);
+          ctx.fillStyle = this.cfg.color;
+          ctx.shadowColor = this.cfg.glow; ctx.shadowBlur = 14;
+          ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.restore();
         ctx.shadowBlur = 0;
       }
     }
@@ -1175,36 +1238,46 @@
     }
 
     class Boss {
-      constructor() {
-        this.x = canvas.width/2; this.y = 120;
-        this.vx = level4Params.bossSpeed; this.dir = 1;
-        this.hp = level4Params.bossHP;
-        this.r = 42;
+      constructor(level) {
+        this.level = level;
+        const cfg = bossConfigs[level] || bossConfigs[4];
+        this.cfg = cfg;
+        const hoverY = cfg.hoverY ?? (level === 3 ? canvas.height * 0.32 : 120);
+        this.x = canvas.width/2; this.y = hoverY;
+        this.vx = cfg.speed; this.dir = 1;
+        this.maxHp = cfg.hp;
+        this.hp = cfg.hp;
+        this.r = cfg.size ?? 42;
       }
       update(deltaSec) {
         this.x += this.dir * this.vx * speedMultiplier * deltaSec;
         if (this.x < 60) { this.x = 60; this.dir = 1; }
         if (this.x > canvas.width - 60) { this.x = canvas.width - 60; this.dir = -1; }
-        return this.hp > 0;
       }
       draw() {
+        const pulse = 1 + Math.sin(performance.now()/240) * 0.06;
         ctx.save();
-        ctx.shadowColor = '#ff3'; ctx.shadowBlur = 28;
-        ctx.fillStyle = '#ffd54d';
-        ctx.beginPath(); ctx.ellipse(this.x, this.y, 70, 40, 0, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = '#ff7733';
-        ctx.beginPath(); ctx.arc(this.x-22, this.y-6, 8, 0, Math.PI*2); ctx.arc(this.x+22, this.y-6, 8, 0, Math.PI*2); ctx.fill();
+        ctx.shadowColor = this.cfg.glow;
+        ctx.shadowBlur = 32;
+        ctx.fillStyle = this.cfg.color;
+        ctx.beginPath(); ctx.ellipse(this.x, this.y, this.r * 1.2 * pulse, this.r * 0.75 * pulse, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.arc(this.x - this.r*0.35, this.y - 8, 9, 0, Math.PI*2); ctx.arc(this.x + this.r*0.35, this.y - 8, 9, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = this.cfg.glow;
+        ctx.beginPath(); ctx.arc(this.x - this.r*0.32, this.y - 8, 4, 0, Math.PI*2); ctx.arc(this.x + this.r*0.32, this.y - 8, 4, 0, Math.PI*2); ctx.fill();
         ctx.fillStyle = '#222';
-        ctx.fillRect(this.x-18, this.y+10, 36, 4);
+        ctx.fillRect(this.x-18, this.y+10, 36, 5);
         ctx.restore();
 
         // Boss health bar
         const w = 240, h = 8, x = canvas.width/2 - w/2, y = 24;
-        ctx.strokeStyle = '#ff3'; ctx.strokeRect(x, y, w, h);
-        const frac = clamp(this.hp / level4Params.bossHP, 0, 1);
-        ctx.fillStyle = '#ff3'; ctx.fillRect(x, y, w*frac, h);
+        ctx.strokeStyle = this.cfg.bar;
+        ctx.strokeRect(x, y, w, h);
+        const frac = clamp(this.hp / this.maxHp, 0, 1);
+        ctx.fillStyle = this.cfg.bar;
+        ctx.fillRect(x, y, w*frac, h);
       }
-      hitTest(px, py, pr) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
+      hitTest(px, py, pr=0) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
     }
 
     // ===== NEW: 2D backgrounds =====
@@ -1272,9 +1345,11 @@
           // Stable spawns (Poisson)
           const lp = level1Params;
           const reloadFactor = isReloading ? 0.35 : 1.0;
-          const lambda = lp.spawnPerSec * reloadFactor * speedMultiplier;
-          const spawnProb = 1 - Math.exp(-lambda * deltaSec);
-          if (Math.random() < spawnProb) targets.push(new Target(lp));
+          if (!boss && !levelCleared) {
+            const lambda = lp.spawnPerSec * reloadFactor * speedMultiplier;
+            const spawnProb = 1 - Math.exp(-lambda * deltaSec);
+            if (Math.random() < spawnProb) targets.push(new Target(lp));
+          }
 
           const chestLambda = coinChestSpawnRates.canyon * reloadFactor * speedMultiplier;
           const chestProb = 1 - Math.exp(-chestLambda * deltaSec);
@@ -1312,7 +1387,7 @@
           const chestProb = 1 - Math.exp(-chestLambda * deltaSec);
           if (Math.random() < chestProb) coinChests2D.push(new CoinChest2D(currentMode));
 
-          if (!boss) { // while boss alive we stop adding more aliens
+          if (!boss && !levelCleared) { // while boss alive or level cleared we stop adding more aliens
             if (Math.random() < spawnProb) {
               if (currentMode === Modes.BATS) enemies2D.push(new Bat());
               else if (currentMode === Modes.JELLIES) enemies2D.push(new Jelly());
@@ -1370,20 +1445,26 @@
 
           // Boss update/draw/hit
           if (boss) {
-            if (!boss.update(deltaSec)) { boss = null; winGame(); }
-            else {
-              boss.draw();
-              // bullets vs boss
-              for (let i=0;i<projectiles.length;i++){
-                const b = projectiles[i];
-                if (boss.hitTest(b.x, b.y, b.r)) {
-                  boss.hp -= b.damage ?? 1; score += 40;
-                  projectiles.splice(i,1);
-                  explosions.push(new Explosion(boss.x, boss.y));
-                  break;
-                }
+            boss.update(deltaSec);
+            boss.draw();
+            // bullets vs boss
+            for (let i=0;i<projectiles.length;i++){
+              const b = projectiles[i];
+              if (boss.hitTest(b.x, b.y, b.r)) {
+                boss.hp -= b.damage ?? 1; score += 40;
+                projectiles.splice(i,1);
+                explosions.push(new Explosion(boss.x, boss.y));
+                break;
               }
             }
+          }
+
+          if (boss && boss.hp <= 0) {
+            const defeatedLevel = boss.level;
+            const defeatedX = boss.x;
+            const defeatedY = boss.y;
+            boss = null;
+            handleBossDefeated(defeatedLevel, defeatedX, defeatedY);
           }
 
           // Draw explosions
@@ -1418,6 +1499,8 @@
           return true;
         });
       }
+
+      bossDefeatFx = bossDefeatFx.filter(fx => { const alive = fx.update(deltaSec); fx.draw(); return alive; });
 
       // Reticle or ship
       if (currentMode === Modes.CANYON) drawCrosshair();
@@ -1514,6 +1597,19 @@
               remaining = 0;
               break;
             }
+          }
+        }
+
+        if (remaining > 0 && boss && boss.hitTest(shot.x, shot.y)) {
+          boss.hp -= shot.damage ?? 1; score += 40;
+          explosions.push(new Explosion(boss.x, boss.y));
+          remaining = 0;
+          if (boss.hp <= 0) {
+            const defeatedLevel = boss.level;
+            const defeatedX = boss.x;
+            const defeatedY = boss.y;
+            boss = null;
+            handleBossDefeated(defeatedLevel, defeatedX, defeatedY);
           }
         }
 
@@ -1745,6 +1841,8 @@
         player.topMode = false; player.bulletDir = -1; clampPlayer();
         initStars();
       }
+      levelCleared = false;
+      bossDefeatFx = [];
       coinChests3D = [];
       coinChests2D = [];
       shuffleQuestionsForLevel(lvl);
@@ -1756,9 +1854,9 @@
       promptTitle.textContent = `RELOAD — Level ${lvl}: ${levelOps[lvl].name}`;
     }
 
-    function spawnBoss() {
-      boss = new Boss();
-      showBanner('BOSS INCOMING!', 1600);
+    function spawnBoss(lvl) {
+      boss = new Boss(lvl);
+      showBanner(`LEVEL ${lvl} BOSS!`, 1600);
     }
 
     // ===== Start =====
