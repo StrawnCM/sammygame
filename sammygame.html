@@ -1374,8 +1374,14 @@
           coinChests3D = newChests;
           explosions = explosions.filter(ex => { const alive = ex.update(dt); if (alive) ex.draw(); return alive; });
 
-        } else {
-          // ==== NEW: 2D mode update ====
+          // Boss (Level 1 canyon) — update and render above the canyon backdrop
+          if (boss) {
+            boss.update(deltaSec);
+            boss.draw();
+          }
+
+      } else {
+        // ==== NEW: 2D mode update ====
           // Spawn by level
           let spawnPerSec = (currentMode===Modes.BATS?level2Params.spawnPerSec:
                              currentMode===Modes.JELLIES?level3Params.spawnPerSec:level4Params.spawnPerSec);
