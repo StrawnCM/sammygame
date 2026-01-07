@@ -254,6 +254,16 @@
     let gameRunning = false; // start on title screen
     let isPaused = false;
 
+    // Driving level state
+    let drivingLane = 1; // 0=left, 1=center, 2=right
+    let roadScrollOffset = 0;
+    let answerGates = [];
+    let roadObstacles = [];
+    let rivalCars = [];
+    let gateSpawnTimer = 0;
+    let drivingSpeed = 1.0; // multiplier for road speed
+    let activeGateProblem = null; // current math problem for gates
+
     // Levels & progression
     let level = 1;
     const maxLevel = 4;
@@ -273,14 +283,14 @@
     function clamp(val, a, b){ return Math.max(a, Math.min(b, val)); }
 
     // ===== Modes (how a level behaves) =====
-    const Modes = { CANYON:'canyon', BATS:'bats', JELLIES:'jellies', ALIENS:'aliens' };
+    const Modes = { CANYON:'canyon', BATS:'bats', DRIVING:'driving', ALIENS:'aliens' };
     let currentMode = Modes.CANYON;
 
     // Per-level math label + symbol
     const levelOps = {
       1: { sym: '+', name: 'Addition' },
       2: { sym: '−', name: 'Subtraction' },
-      3: { sym: '×', name: 'Multiplication' },
+      3: { sym: '×', name: 'Neon Highway' },
       4: { sym: '×', name: 'Galactic Multiplication' }
     };
 
@@ -489,12 +499,14 @@
       hp: 1,
       touchDamage: 10
     };
-    const level3Params = { // Swamp/Underwater (rise up)
-      spawnPerSec: 1.0,
-      vyRange: [90, 140],     // upward speed
-      driftRange: [-40, 40],  // gentle sideways drift
-      hp: 2,                  // tougher
-      touchDamage: 12
+    const level3Params = { // Neon Highway (driving)
+      roadSpeed: 400,          // pixels/sec road scroll speed
+      laneCount: 3,
+      gateSpawnInterval: 3.5,  // seconds between answer gates
+      obstacleSpawnRate: 0.8,  // obstacles per second
+      rivalCarRate: 0.3,       // rival cars per second
+      obstacleDamage: 15,
+      wrongAnswerDamage: 20
     };
     const level4Params = { // Space + Boss
       spawnPerSec: 1.15,
@@ -508,7 +520,7 @@
     const bossConfigs = {
       1: { hp: 10, speed: 90, color: '#ff77aa', glow: '#ffcc33', bar: '#ffdd66', size: 60, hoverY: 140 },
       2: { hp: 12, speed: 110, color: '#66e0ff', glow: '#33ffaa', bar: '#7affc5', size: 64, hoverY: 120 },
-      3: { hp: 14, speed: 105, color: '#8df08d', glow: '#c0ff66', bar: '#a8ff7a', size: 70, hoverY: null },
+      3: { hp: 14, speed: 180, color: '#ff4444', glow: '#ff6666', bar: '#ff8888', size: 50, hoverY: null, isPolice: true },
       4: { hp: 16, speed: 120, color: '#ffd54d', glow: '#ff3', bar: '#ff3', size: 72, hoverY: 120 }
     };
 
@@ -667,6 +679,14 @@
       heartSpawnTimer = 0;
       enemies2D = [];
       projectiles = [];
+      answerGates = [];
+      roadObstacles = [];
+      rivalCars = [];
+      drivingLane = 1;
+      roadScrollOffset = 0;
+      gateSpawnTimer = 0;
+      drivingSpeed = 1.0;
+      activeGateProblem = null;
       boss = null;
       gameRunning = true;
       isReloading = false;
@@ -988,6 +1008,52 @@
       ctx.restore();
     }
 
+    function drawPlayerCar() {
+      const x = getLaneX(drivingLane);
+      const y = canvas.height - 80;
+
+      ctx.save();
+      // Car body
+      ctx.shadowColor = '#00ffff';
+      ctx.shadowBlur = 25;
+      ctx.fillStyle = '#00cccc';
+      ctx.fillRect(x - 20, y - 35, 40, 70);
+
+      // Hood gradient
+      ctx.fillStyle = '#00aaaa';
+      ctx.fillRect(x - 18, y - 30, 36, 25);
+
+      // Windshield
+      ctx.fillStyle = '#003344';
+      ctx.fillRect(x - 14, y - 22, 28, 18);
+
+      // Headlights
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 12;
+      ctx.fillRect(x - 16, y - 33, 8, 5);
+      ctx.fillRect(x + 8, y - 33, 8, 5);
+
+      // Taillights
+      ctx.fillStyle = '#ff0000';
+      ctx.shadowColor = '#ff0000';
+      ctx.shadowBlur = 8;
+      ctx.fillRect(x - 16, y + 28, 8, 5);
+      ctx.fillRect(x + 8, y + 28, 8, 5);
+
+      // Neon underglow
+      ctx.shadowColor = '#ff00ff';
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = '#ff00ff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x - 22, y + 35);
+      ctx.lineTo(x + 22, y + 35);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
     class Bullet {
       constructor({ x, y, dir, speed, r, damage, vx }) {
         this.x = x;
@@ -1302,6 +1368,386 @@
       }
     }
 
+    // ===== Neon Highway Background (Level 3) =====
+    let roadLines = [];
+    function initRoadLines() {
+      roadLines = [];
+      for (let i = 0; i < 20; i++) {
+        roadLines.push({ y: i * 60 });
+      }
+    }
+
+    function getLaneX(lane) {
+      const roadWidth = Math.min(400, canvas.width * 0.6);
+      const laneWidth = roadWidth / 3;
+      const roadLeft = (canvas.width - roadWidth) / 2;
+      return roadLeft + laneWidth * lane + laneWidth / 2;
+    }
+
+    function drawHighwayBG(deltaSec) {
+      // Dark purple sky
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      skyGrad.addColorStop(0, '#1a0033');
+      skyGrad.addColorStop(0.5, '#330044');
+      skyGrad.addColorStop(1, '#220033');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Stars in the sky
+      ctx.fillStyle = '#fff';
+      for (let i = 0; i < 40; i++) {
+        const sx = (i * 137 + roadScrollOffset * 0.02) % canvas.width;
+        const sy = (i * 73) % (canvas.height * 0.4);
+        ctx.fillRect(sx, sy, 1.5, 1.5);
+      }
+
+      // Road dimensions
+      const roadWidth = Math.min(400, canvas.width * 0.6);
+      const roadLeft = (canvas.width - roadWidth) / 2;
+      const roadRight = roadLeft + roadWidth;
+      const horizonY = canvas.height * 0.25;
+
+      // Road surface with perspective gradient
+      const roadGrad = ctx.createLinearGradient(0, horizonY, 0, canvas.height);
+      roadGrad.addColorStop(0, '#1a1a2e');
+      roadGrad.addColorStop(1, '#2d2d44');
+      ctx.fillStyle = roadGrad;
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2 - 20, horizonY);
+      ctx.lineTo(canvas.width / 2 + 20, horizonY);
+      ctx.lineTo(roadRight, canvas.height);
+      ctx.lineTo(roadLeft, canvas.height);
+      ctx.closePath();
+      ctx.fill();
+
+      // Neon road edges
+      ctx.shadowColor = '#ff00ff';
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = '#ff00ff';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2 - 20, horizonY);
+      ctx.lineTo(roadLeft, canvas.height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2 + 20, horizonY);
+      ctx.lineTo(roadRight, canvas.height);
+      ctx.stroke();
+
+      // Lane dividers (dashed, scrolling)
+      ctx.shadowColor = '#00ffff';
+      ctx.shadowBlur = 10;
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([30, 40]);
+
+      const scrollSpeed = level3Params.roadSpeed * speedMultiplier * drivingSpeed;
+      roadScrollOffset = (roadScrollOffset + scrollSpeed * deltaSec) % 70;
+
+      // Draw scrolling lane markers
+      const laneWidth = roadWidth / 3;
+      for (let lane = 1; lane < 3; lane++) {
+        const topX = canvas.width / 2 + (lane - 1.5) * 12;
+        const bottomX = roadLeft + laneWidth * lane;
+
+        ctx.lineDashOffset = -roadScrollOffset;
+        ctx.beginPath();
+        ctx.moveTo(topX, horizonY + 20);
+        ctx.lineTo(bottomX, canvas.height);
+        ctx.stroke();
+      }
+
+      ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
+    }
+
+    // ===== Driving Level Classes =====
+    class AnswerGate {
+      constructor(answers, correctIndex, problem) {
+        this.y = -80;
+        this.answers = answers; // array of 3 numbers
+        this.correctIndex = correctIndex; // which lane has correct answer
+        this.problem = problem;
+        this.speed = level3Params.roadSpeed;
+        this.passed = false;
+        this.height = 60;
+      }
+      update(deltaSec) {
+        this.y += this.speed * speedMultiplier * drivingSpeed * deltaSec;
+        return this.y < canvas.height + 100;
+      }
+      draw() {
+        const roadWidth = Math.min(400, canvas.width * 0.6);
+        const roadLeft = (canvas.width - roadWidth) / 2;
+        const laneWidth = roadWidth / 3;
+
+        for (let i = 0; i < 3; i++) {
+          const x = roadLeft + laneWidth * i + laneWidth / 2;
+          const isCorrect = i === this.correctIndex;
+
+          // Gate frame
+          ctx.save();
+          ctx.shadowColor = isCorrect ? '#00ff88' : '#ff6600';
+          ctx.shadowBlur = 15;
+          ctx.strokeStyle = isCorrect ? '#00ff88' : '#ff6600';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(x - 35, this.y - 25, 70, 50);
+
+          // Answer number
+          ctx.fillStyle = isCorrect ? '#00ff88' : '#ff6600';
+          ctx.font = 'bold 28px "Courier New", monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(this.answers[i], x, this.y);
+          ctx.restore();
+        }
+
+        // Draw the problem at the top
+        if (this.y < canvas.height * 0.5) {
+          ctx.save();
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = '#00ffff';
+          ctx.shadowBlur = 10;
+          ctx.font = 'bold 32px "Courier New", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${this.problem.a} × ${this.problem.b} = ?`, canvas.width / 2, 50);
+          ctx.restore();
+        }
+      }
+      checkCollision(playerLane, playerY) {
+        if (this.passed) return null;
+        const gateTop = this.y - 25;
+        const gateBottom = this.y + 25;
+        if (playerY >= gateTop && playerY <= gateBottom + 40) {
+          this.passed = true;
+          return playerLane === this.correctIndex;
+        }
+        return null;
+      }
+    }
+
+    class RoadObstacle {
+      constructor() {
+        this.lane = randInt(0, 2);
+        this.y = -60;
+        this.width = 50;
+        this.height = 30;
+        this.speed = level3Params.roadSpeed;
+        this.type = Math.random() < 0.5 ? 'barrier' : 'cone';
+      }
+      update(deltaSec) {
+        this.y += this.speed * speedMultiplier * drivingSpeed * deltaSec;
+        return this.y < canvas.height + 60;
+      }
+      draw() {
+        const x = getLaneX(this.lane);
+        ctx.save();
+
+        if (this.type === 'barrier') {
+          // Orange/white striped barrier
+          ctx.shadowColor = '#ff6600';
+          ctx.shadowBlur = 12;
+          ctx.fillStyle = '#ff6600';
+          ctx.fillRect(x - 25, this.y - 12, 50, 24);
+          ctx.fillStyle = '#ffffff';
+          for (let i = 0; i < 4; i++) {
+            ctx.fillRect(x - 25 + i * 14, this.y - 12, 7, 24);
+          }
+        } else {
+          // Traffic cone
+          ctx.shadowColor = '#ff4400';
+          ctx.shadowBlur = 10;
+          ctx.fillStyle = '#ff4400';
+          ctx.beginPath();
+          ctx.moveTo(x, this.y - 20);
+          ctx.lineTo(x - 12, this.y + 10);
+          ctx.lineTo(x + 12, this.y + 10);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(x - 8, this.y - 5, 16, 5);
+        }
+        ctx.restore();
+      }
+      checkCollision(playerLane, playerY) {
+        if (this.lane !== playerLane) return false;
+        const dist = Math.abs(this.y - playerY);
+        return dist < 35;
+      }
+    }
+
+    class RivalCar {
+      constructor() {
+        this.lane = randInt(0, 2);
+        this.y = -80;
+        this.width = 40;
+        this.height = 70;
+        this.speed = level3Params.roadSpeed * 0.7; // slower than road
+        this.wobbleTimer = 0;
+        this.targetLane = this.lane;
+        this.x = getLaneX(this.lane);
+      }
+      update(deltaSec) {
+        this.y += this.speed * speedMultiplier * drivingSpeed * deltaSec;
+
+        // Occasionally change lanes
+        this.wobbleTimer -= deltaSec;
+        if (this.wobbleTimer <= 0) {
+          this.wobbleTimer = randRange(1.5, 3);
+          if (Math.random() < 0.4) {
+            this.targetLane = clamp(this.lane + (Math.random() < 0.5 ? -1 : 1), 0, 2);
+          }
+        }
+
+        // Smooth lane transition
+        const targetX = getLaneX(this.targetLane);
+        this.x += (targetX - this.x) * 3 * deltaSec;
+        if (Math.abs(this.x - targetX) < 5) this.lane = this.targetLane;
+
+        return this.y < canvas.height + 100;
+      }
+      draw() {
+        ctx.save();
+        // Car body
+        ctx.shadowColor = '#ff3366';
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = '#cc2255';
+        ctx.fillRect(this.x - 18, this.y - 30, 36, 60);
+
+        // Windshield
+        ctx.fillStyle = '#333355';
+        ctx.fillRect(this.x - 12, this.y - 20, 24, 18);
+
+        // Rear lights
+        ctx.fillStyle = '#ff0000';
+        ctx.shadowColor = '#ff0000';
+        ctx.shadowBlur = 8;
+        ctx.fillRect(this.x - 16, this.y + 22, 8, 6);
+        ctx.fillRect(this.x + 8, this.y + 22, 8, 6);
+        ctx.restore();
+      }
+      checkCollision(playerLane, playerY) {
+        const playerX = getLaneX(playerLane);
+        const dx = Math.abs(this.x - playerX);
+        const dy = Math.abs(this.y - playerY);
+        return dx < 35 && dy < 45;
+      }
+    }
+
+    class PoliceBoss {
+      constructor() {
+        this.cfg = bossConfigs[3];
+        this.lane = 1;
+        this.x = getLaneX(1);
+        this.y = canvas.height * 0.3;
+        this.maxHp = this.cfg.hp;
+        this.hp = this.cfg.hp;
+        this.width = 45;
+        this.height = 80;
+        this.actionTimer = 0;
+        this.sirenPhase = 0;
+        this.chargeTimer = 0;
+        this.isCharging = false;
+        this.invulnerable = 0;
+      }
+      update(deltaSec) {
+        this.sirenPhase += deltaSec * 8;
+        this.invulnerable = Math.max(0, this.invulnerable - deltaSec);
+
+        // AI behavior
+        this.actionTimer -= deltaSec;
+        if (this.actionTimer <= 0) {
+          this.actionTimer = randRange(0.8, 1.5);
+
+          // Randomly change lanes or charge
+          if (Math.random() < 0.3 && !this.isCharging) {
+            this.isCharging = true;
+            this.chargeTimer = 0.6;
+          } else {
+            const newLane = clamp(this.lane + (Math.random() < 0.5 ? -1 : 1), 0, 2);
+            this.lane = newLane;
+          }
+        }
+
+        // Handle charging
+        if (this.isCharging) {
+          this.chargeTimer -= deltaSec;
+          this.y += 300 * deltaSec;
+          if (this.chargeTimer <= 0) {
+            this.isCharging = false;
+            this.y = canvas.height * 0.3;
+          }
+        }
+
+        // Smooth movement to target lane
+        const targetX = getLaneX(this.lane);
+        this.x += (targetX - this.x) * 5 * deltaSec;
+      }
+      draw() {
+        ctx.save();
+
+        // Police car body
+        ctx.shadowColor = '#4444ff';
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = '#222244';
+        ctx.fillRect(this.x - 22, this.y - 35, 44, 70);
+
+        // White stripe
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(this.x - 22, this.y - 10, 44, 8);
+
+        // Windshield
+        ctx.fillStyle = '#111122';
+        ctx.fillRect(this.x - 16, this.y - 25, 32, 20);
+
+        // Siren lights (alternating)
+        const sirenColor1 = Math.sin(this.sirenPhase) > 0 ? '#ff0000' : '#440000';
+        const sirenColor2 = Math.sin(this.sirenPhase) > 0 ? '#440044' : '#0000ff';
+        ctx.fillStyle = sirenColor1;
+        ctx.shadowColor = sirenColor1;
+        ctx.shadowBlur = 15;
+        ctx.fillRect(this.x - 18, this.y - 40, 14, 8);
+        ctx.fillStyle = sirenColor2;
+        ctx.shadowColor = sirenColor2;
+        ctx.fillRect(this.x + 4, this.y - 40, 14, 8);
+
+        // Boss health bar
+        const barW = 200, barH = 10, barX = canvas.width / 2 - barW / 2, barY = 20;
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = this.cfg.bar;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(barX, barY, barW, barH);
+        const frac = clamp(this.hp / this.maxHp, 0, 1);
+        ctx.fillStyle = this.cfg.bar;
+        ctx.fillRect(barX, barY, barW * frac, barH);
+
+        // "POLICE" text
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('POLICE', this.x, this.y + 5);
+
+        ctx.restore();
+      }
+      checkPlayerCollision(playerLane, playerY) {
+        const playerX = getLaneX(playerLane);
+        const dx = Math.abs(this.x - playerX);
+        const dy = Math.abs(this.y - playerY);
+        return dx < 40 && dy < 50;
+      }
+      checkObstacleHit(obstacle) {
+        if (this.invulnerable > 0) return false;
+        const dx = Math.abs(getLaneX(obstacle.lane) - this.x);
+        const dy = Math.abs(obstacle.y - this.y);
+        if (dx < 35 && dy < 40) {
+          this.hp--;
+          this.invulnerable = 0.5;
+          return true;
+        }
+        return false;
+      }
+    }
+
     // Starfield for Level 4
     let stars = [];
     function initStars() {
@@ -1337,7 +1783,7 @@
       // Background per-level
       if (currentMode === Modes.CANYON) drawCanyon();
       else if (currentMode === Modes.BATS) drawBatCaveBG();
-      else if (currentMode === Modes.JELLIES) drawSwampBG();
+      else if (currentMode === Modes.DRIVING) drawHighwayBG(deltaSec);
       else if (currentMode === Modes.ALIENS) drawSpaceBG(deltaSec);
 
       if (gameRunning) {
@@ -1380,11 +1826,151 @@
             boss.draw();
           }
 
+      } else if (currentMode === Modes.DRIVING) {
+        // ==== DRIVING MODE (Level 3 - Neon Highway) ====
+        const playerY = canvas.height - 80;
+
+        // Spawn answer gates on timer
+        if (!boss && !levelCleared) {
+          gateSpawnTimer -= deltaSec;
+          if (gateSpawnTimer <= 0 && questionIndex[level] < levelQuestions[level].length) {
+            gateSpawnTimer = level3Params.gateSpawnInterval;
+            const problem = levelQuestions[level][questionIndex[level]];
+            const correctAnswer = problem.answer;
+            const correctLane = randInt(0, 2);
+
+            // Generate wrong answers
+            const answers = [];
+            for (let i = 0; i < 3; i++) {
+              if (i === correctLane) {
+                answers.push(correctAnswer);
+              } else {
+                // Generate a plausible wrong answer
+                let wrong = correctAnswer + randInt(-15, 15);
+                while (wrong === correctAnswer || wrong <= 0 || answers.includes(wrong)) {
+                  wrong = correctAnswer + randInt(-20, 20);
+                  if (wrong <= 0) wrong = correctAnswer + randInt(1, 10);
+                }
+                answers.push(wrong);
+              }
+            }
+            answerGates.push(new AnswerGate(answers, correctLane, problem));
+          }
+        }
+
+        // Spawn obstacles
+        if (!boss && !levelCleared) {
+          const obstacleProb = 1 - Math.exp(-level3Params.obstacleSpawnRate * speedMultiplier * deltaSec);
+          if (Math.random() < obstacleProb) {
+            roadObstacles.push(new RoadObstacle());
+          }
+          const rivalProb = 1 - Math.exp(-level3Params.rivalCarRate * speedMultiplier * deltaSec);
+          if (Math.random() < rivalProb) {
+            rivalCars.push(new RivalCar());
+          }
+        }
+
+        // Update and draw obstacles
+        roadObstacles = roadObstacles.filter(ob => {
+          const alive = ob.update(deltaSec);
+          if (!alive) return false;
+          ob.draw();
+
+          // Check collision with player
+          if (ob.checkCollision(drivingLane, playerY)) {
+            health -= level3Params.obstacleDamage;
+            updateUI();
+            explosions.push(new Explosion(getLaneX(drivingLane), playerY));
+            return false;
+          }
+
+          // During boss fight, check if obstacle hits boss
+          if (boss && boss.checkObstacleHit && boss.checkObstacleHit(ob)) {
+            score += 50;
+            explosions.push(new Explosion(boss.x, boss.y));
+            updateUI();
+            return false;
+          }
+
+          return true;
+        });
+
+        // Update and draw rival cars
+        rivalCars = rivalCars.filter(car => {
+          const alive = car.update(deltaSec);
+          if (!alive) return false;
+          car.draw();
+
+          // Check collision with player
+          if (car.checkCollision(drivingLane, playerY)) {
+            health -= level3Params.obstacleDamage;
+            updateUI();
+            explosions.push(new Explosion(getLaneX(drivingLane), playerY));
+            return false;
+          }
+          return true;
+        });
+
+        // Update and draw answer gates
+        answerGates = answerGates.filter(gate => {
+          const alive = gate.update(deltaSec);
+          if (!alive) return false;
+          gate.draw();
+
+          // Check if player passed through a gate
+          const result = gate.checkCollision(drivingLane, playerY);
+          if (result !== null) {
+            if (result === true) {
+              // Correct answer!
+              score += 100;
+              correctThisLevel++;
+              questionIndex[level]++;
+              drivingSpeed = Math.min(1.8, drivingSpeed + 0.05);
+              showBanner('Correct!', 600);
+
+              if (correctThisLevel >= levelGoal && !boss && !levelCleared) {
+                spawnDrivingBoss();
+              }
+            } else {
+              // Wrong answer
+              health -= level3Params.wrongAnswerDamage;
+              drivingSpeed = Math.max(0.6, drivingSpeed - 0.1);
+              showBanner('Wrong!', 600);
+            }
+            updateUI();
+            return false;
+          }
+          return true;
+        });
+
+        // Police boss update
+        if (boss) {
+          boss.update(deltaSec);
+          boss.draw();
+
+          // Check if boss collides with player
+          if (boss.checkPlayerCollision(drivingLane, playerY)) {
+            health -= 15;
+            updateUI();
+            explosions.push(new Explosion(getLaneX(drivingLane), playerY));
+          }
+
+          // Check if boss HP depleted
+          if (boss.hp <= 0) {
+            const defeatedX = boss.x;
+            const defeatedY = boss.y;
+            boss = null;
+            handleBossDefeated(3, defeatedX, defeatedY);
+          }
+        }
+
+        // Draw explosions
+        explosions = explosions.filter(ex => { const alive = ex.update(dt); if (alive) ex.draw(); return alive; });
+
       } else {
-        // ==== NEW: 2D mode update ====
+        // ==== 2D mode update (BATS, ALIENS) ====
           // Spawn by level
-          let spawnPerSec = (currentMode===Modes.BATS?level2Params.spawnPerSec:
-                             currentMode===Modes.JELLIES?level3Params.spawnPerSec:level4Params.spawnPerSec);
+          let spawnPerSec = (currentMode===Modes.BATS?level2Params.spawnPerSec:level4Params.spawnPerSec);
           const reloadFactor = isReloading ? 0.35 : 1.0;
           const lambda = spawnPerSec * reloadFactor * speedMultiplier;
           const spawnProb = 1 - Math.exp(-lambda * deltaSec);
@@ -1393,10 +1979,9 @@
           const chestProb = 1 - Math.exp(-chestLambda * deltaSec);
           if (Math.random() < chestProb) coinChests2D.push(new CoinChest2D(currentMode));
 
-          if (!boss && !levelCleared) { // while boss alive or level cleared we stop adding more aliens
+          if (!boss && !levelCleared) { // while boss alive or level cleared we stop adding more enemies
             if (Math.random() < spawnProb) {
               if (currentMode === Modes.BATS) enemies2D.push(new Bat());
-              else if (currentMode === Modes.JELLIES) enemies2D.push(new Jelly());
               else if (currentMode === Modes.ALIENS) enemies2D.push(new Alien());
             }
           }
@@ -1491,7 +2076,17 @@
           const alive = h.update(deltaSec);
           if (!alive) return false;
           h.draw();
-          if (currentMode !== Modes.CANYON) {
+
+          // Driving mode: car collects hearts
+          if (currentMode === Modes.DRIVING) {
+            const playerX = getLaneX(drivingLane);
+            const playerY = canvas.height - 80;
+            if (h.hitTest(playerX, playerY, 25)) {
+              health = Math.min(100, health + 10);
+              updateUI();
+              return false;
+            }
+          } else if (currentMode !== Modes.CANYON) {
             for (let i=0;i<projectiles.length;i++) {
               const b = projectiles[i];
               if (h.hitTest(b.x, b.y, b.r)) {
@@ -1508,8 +2103,9 @@
 
       bossDefeatFx = bossDefeatFx.filter(fx => { const alive = fx.update(deltaSec); fx.draw(); return alive; });
 
-      // Reticle or ship
+      // Reticle, ship, or car
       if (currentMode === Modes.CANYON) drawCrosshair();
+      else if (currentMode === Modes.DRIVING) drawPlayerCar();
       else drawShip();
 
       requestAnimationFrame(gameLoop);
@@ -1650,6 +2246,9 @@
       hearts = [];
       coinChests3D = [];
       coinChests2D = [];
+      answerGates = [];
+      roadObstacles = [];
+      rivalCars = [];
       if (boss) { boss.hp = 0; }
       updateUI();
     }
@@ -1757,6 +2356,7 @@
     // Shooting
     function tryShoot() {
       if (!gameRunning || isReloading) return;
+      if (currentMode === Modes.DRIVING) return; // No shooting in driving mode
       const weapon = weaponCatalog[currentWeapon] || weaponCatalog.blaster;
       const bulletCost = weapon.bulletCost ?? 1;
       if (bullets < bulletCost) { showMathPrompt(); return; }
@@ -1796,7 +2396,7 @@
     // Keyboard controls for ship levels
     window.addEventListener('keydown', (e) => {
       if ((e.key === 'a' || e.key === 'A') && !e.repeat) {
-        if (gameRunning && shopScreen.style.display === 'none') {
+        if (gameRunning && shopScreen.style.display === 'none' && currentMode !== Modes.DRIVING) {
           e.preventDefault();
           openShop();
           player.moveLeft = false;
@@ -1804,9 +2404,24 @@
           return;
         }
       }
+
+      // Driving mode: lane switching with arrow keys or A/D
+      if (currentMode === Modes.DRIVING && gameRunning && !e.repeat) {
+        if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+          drivingLane = Math.max(0, drivingLane - 1);
+          e.preventDefault();
+          return;
+        }
+        if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+          drivingLane = Math.min(2, drivingLane + 1);
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') player.moveLeft = true;
       if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') player.moveRight = true;
-      if (e.key === ' ' ) { e.preventDefault(); tryShoot(); }
+      if (e.key === ' ' && currentMode !== Modes.DRIVING) { e.preventDefault(); tryShoot(); }
       if ((e.key === 'p' || e.key === 'P') && !e.repeat) togglePause();
       if ((e.key === 'n' || e.key === 'N') && !e.repeat) activateNuke();
       if (!gameRunning && e.key === 'Enter' && startScreen.style.display !== 'none') startBtn.click();
@@ -1836,10 +2451,14 @@
         enemies2D = []; projectiles = []; explosions = []; boss = null;
         player.topMode = false; player.bulletDir = -1; clampPlayer();
       } else if (lvl === 3) {
-        currentMode = Modes.JELLIES;
+        currentMode = Modes.DRIVING;
         document.body.classList.add('ship-mode');
+        canvas.style.cursor = 'none';
         enemies2D = []; projectiles = []; explosions = []; boss = null;
-        player.topMode = true; player.bulletDir = +1; clampPlayer();
+        answerGates = []; roadObstacles = []; rivalCars = [];
+        drivingLane = 1; roadScrollOffset = 0; gateSpawnTimer = 0;
+        drivingSpeed = 1.0; activeGateProblem = null;
+        initRoadLines();
       } else {
         currentMode = Modes.ALIENS;
         document.body.classList.add('ship-mode');
@@ -1863,6 +2482,12 @@
     function spawnBoss(lvl) {
       boss = new Boss(lvl);
       showBanner(`LEVEL ${lvl} BOSS!`, 1600);
+    }
+
+    function spawnDrivingBoss() {
+      boss = new PoliceBoss();
+      answerGates = []; // Clear any remaining gates
+      showBanner('POLICE CHASE!', 1600);
     }
 
     // ===== Start =====
