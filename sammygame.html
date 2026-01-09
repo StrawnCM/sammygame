@@ -502,7 +502,7 @@
     const level3Params = { // Neon Highway (driving)
       roadSpeed: 400,          // pixels/sec road scroll speed
       laneCount: 3,
-      gateSpawnInterval: 10,   // seconds between answer gates (longer gaps)
+      gateSpawnInterval: 17,   // seconds between answer gates (longer gaps)
       obstacleSpawnRate: 0.8,  // obstacles per second
       rivalCarRate: 0.3,       // rival cars per second
       obstacleDamage: 15,
@@ -1088,25 +1088,39 @@
         // In driving mode, spawn hearts in lanes
         if (currentMode === Modes.DRIVING) {
           this.lane = randInt(0, 2);
-          this.x = getLaneX(this.lane);
           this.vy = level3Params.roadSpeed * 0.8; // Move with road speed
+          this.isDriving = true;
         } else {
           this.x = randInt(30, canvas.width - 30);
           this.vy = 60;
+          this.isDriving = false;
         }
         this.y = -40;
         this.r = 16;
       }
       update(deltaSec) {
-        const speed = currentMode === Modes.DRIVING ? this.vy * drivingSpeed : this.vy;
+        const speed = this.isDriving ? this.vy * drivingSpeed : this.vy;
         this.y += speed * speedMultiplier * deltaSec;
         return this.y < canvas.height + 40;
       }
       draw() {
         ctx.save();
         ctx.fillStyle = '#ff4d4d';
-        ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 20;
-        const x = this.x, y = this.y, r = this.r;
+
+        let x, r;
+        if (this.isDriving) {
+          // Use perspective positioning in driving mode
+          const persp = getPerspective(this.lane, this.y);
+          x = persp.x;
+          r = this.r * persp.scale;
+          ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 20 * persp.scale;
+        } else {
+          x = this.x;
+          r = this.r;
+          ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 20;
+        }
+
+        const y = this.y;
         ctx.beginPath();
         ctx.moveTo(x, y);
         ctx.bezierCurveTo(x + r, y - r, x + r*2, y + r, x, y + r*2);
@@ -1115,7 +1129,16 @@
         ctx.shadowBlur = 0;
         ctx.restore();
       }
-      hitTest(px, py, pr=0) { return Math.hypot(this.x - px, this.y - py) < (this.r + pr); }
+      hitTest(px, py, pr=0) {
+        let heartX;
+        if (this.isDriving) {
+          const persp = getPerspective(this.lane, this.y);
+          heartX = persp.x;
+        } else {
+          heartX = this.x;
+        }
+        return Math.hypot(heartX - px, this.y - py) < (this.r + pr);
+      }
     }
 
     class CoinChest3D {
@@ -1393,6 +1416,33 @@
       return roadLeft + laneWidth * lane + laneWidth / 2;
     }
 
+    // Perspective helper: returns X position and scale for objects on the road
+    function getPerspective(lane, yPos) {
+      const horizonY = canvas.height * 0.25;
+      const bottomY = canvas.height;
+      const roadWidthBottom = Math.min(400, canvas.width * 0.6);
+      const roadWidthHorizon = 40; // Width at horizon (vanishing point)
+
+      // Clamp Y to valid range
+      const clampedY = Math.max(horizonY, Math.min(bottomY, yPos));
+
+      // Calculate progress from horizon (0) to bottom (1)
+      const progress = (clampedY - horizonY) / (bottomY - horizonY);
+
+      // Interpolate road width based on perspective
+      const currentRoadWidth = roadWidthHorizon + (roadWidthBottom - roadWidthHorizon) * progress;
+      const laneWidth = currentRoadWidth / 3;
+      const roadLeft = (canvas.width - currentRoadWidth) / 2;
+
+      // Calculate X position for this lane at this Y
+      const x = roadLeft + laneWidth * lane + laneWidth / 2;
+
+      // Scale factor (smaller near horizon, larger near bottom)
+      const scale = 0.2 + 0.8 * progress;
+
+      return { x, scale, progress };
+    }
+
     function drawHighwayBG(deltaSec) {
       // Dark purple sky
       const skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
@@ -1486,52 +1536,58 @@
         return this.y < canvas.height + 100;
       }
       draw() {
-        const roadWidth = Math.min(400, canvas.width * 0.6);
-        const roadLeft = (canvas.width - roadWidth) / 2;
-        const laneWidth = roadWidth / 3;
+        // Use uniform cyan color for all gates (player must guess the correct answer)
+        const gateColor = '#00ffff';
 
         for (let i = 0; i < 3; i++) {
-          const x = roadLeft + laneWidth * i + laneWidth / 2;
-          const isCorrect = i === this.correctIndex;
+          // Get perspective-correct position and scale for this gate
+          const persp = getPerspective(i, this.y);
+          const x = persp.x;
+          const scale = persp.scale;
 
-          // Gate frame - larger and more visible
+          // Scale gate dimensions based on perspective
+          const gateWidth = 90 * scale;
+          const gateHeight = 70 * scale;
+          const fontSize = Math.max(16, Math.floor(38 * scale));
+
           ctx.save();
-          ctx.shadowColor = isCorrect ? '#00ff88' : '#ff6600';
-          ctx.shadowBlur = 25;
+          ctx.shadowColor = gateColor;
+          ctx.shadowBlur = 25 * scale;
 
           // Gate background
           ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-          ctx.fillRect(x - 45, this.y - 35, 90, 70);
+          ctx.fillRect(x - gateWidth / 2, this.y - gateHeight / 2, gateWidth, gateHeight);
 
           // Gate border
-          ctx.strokeStyle = isCorrect ? '#00ff88' : '#ff6600';
-          ctx.lineWidth = 5;
-          ctx.strokeRect(x - 45, this.y - 35, 90, 70);
+          ctx.strokeStyle = gateColor;
+          ctx.lineWidth = Math.max(2, 5 * scale);
+          ctx.strokeRect(x - gateWidth / 2, this.y - gateHeight / 2, gateWidth, gateHeight);
 
-          // Answer number - larger font
-          ctx.fillStyle = isCorrect ? '#00ff88' : '#ff6600';
-          ctx.font = 'bold 38px "Courier New", monospace';
+          // Answer number - scaled font
+          ctx.fillStyle = gateColor;
+          ctx.font = `bold ${fontSize}px "Courier New", monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(this.answers[i], x, this.y);
           ctx.restore();
         }
 
-        // Draw the problem prominently at the top center
-        if (this.y < canvas.height * 0.6) {
+        // Draw the problem prominently - positioned lower for visibility
+        if (this.y < canvas.height * 0.7) {
           ctx.save();
           const problemText = `${this.problem.a} × ${this.problem.b} = ?`;
 
-          // Draw background box for visibility
+          // Draw background box for visibility - positioned lower on screen
           ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
           ctx.shadowColor = '#00ffff';
           ctx.shadowBlur = 30;
           const boxWidth = 320;
           const boxHeight = 80;
-          ctx.fillRect(canvas.width / 2 - boxWidth / 2, 25, boxWidth, boxHeight);
+          const boxY = canvas.height * 0.18; // Positioned lower (was 25px from top)
+          ctx.fillRect(canvas.width / 2 - boxWidth / 2, boxY, boxWidth, boxHeight);
           ctx.strokeStyle = '#00ffff';
           ctx.lineWidth = 3;
-          ctx.strokeRect(canvas.width / 2 - boxWidth / 2, 25, boxWidth, boxHeight);
+          ctx.strokeRect(canvas.width / 2 - boxWidth / 2, boxY, boxWidth, boxHeight);
 
           // Draw the math problem text - large and centered
           ctx.fillStyle = '#ffffff';
@@ -1540,7 +1596,7 @@
           ctx.font = 'bold 48px "Courier New", monospace';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(problemText, canvas.width / 2, 65);
+          ctx.fillText(problemText, canvas.width / 2, boxY + boxHeight / 2);
           ctx.restore();
         }
       }
@@ -1606,32 +1662,41 @@
         return this.y < canvas.height + 60;
       }
       draw() {
-        const x = getLaneX(this.lane);
+        // Get perspective-correct position and scale
+        const persp = getPerspective(this.lane, this.y);
+        const x = persp.x;
+        const scale = persp.scale;
         ctx.save();
 
         if (this.type === 'barrier') {
-          // Orange/white striped barrier
+          // Orange/white striped barrier with perspective scaling
+          const barrierWidth = 50 * scale;
+          const barrierHeight = 24 * scale;
           ctx.shadowColor = '#ff6600';
-          ctx.shadowBlur = 12;
+          ctx.shadowBlur = 12 * scale;
           ctx.fillStyle = '#ff6600';
-          ctx.fillRect(x - 25, this.y - 12, 50, 24);
+          ctx.fillRect(x - barrierWidth / 2, this.y - barrierHeight / 2, barrierWidth, barrierHeight);
           ctx.fillStyle = '#ffffff';
+          const stripeWidth = 7 * scale;
+          const stripeSpacing = 14 * scale;
           for (let i = 0; i < 4; i++) {
-            ctx.fillRect(x - 25 + i * 14, this.y - 12, 7, 24);
+            ctx.fillRect(x - barrierWidth / 2 + i * stripeSpacing, this.y - barrierHeight / 2, stripeWidth, barrierHeight);
           }
         } else {
-          // Traffic cone
+          // Traffic cone with perspective scaling
+          const coneHeight = 30 * scale;
+          const coneWidth = 24 * scale;
           ctx.shadowColor = '#ff4400';
-          ctx.shadowBlur = 10;
+          ctx.shadowBlur = 10 * scale;
           ctx.fillStyle = '#ff4400';
           ctx.beginPath();
-          ctx.moveTo(x, this.y - 20);
-          ctx.lineTo(x - 12, this.y + 10);
-          ctx.lineTo(x + 12, this.y + 10);
+          ctx.moveTo(x, this.y - coneHeight / 2);
+          ctx.lineTo(x - coneWidth / 2, this.y + coneHeight / 3);
+          ctx.lineTo(x + coneWidth / 2, this.y + coneHeight / 3);
           ctx.closePath();
           ctx.fill();
           ctx.fillStyle = '#ffffff';
-          ctx.fillRect(x - 8, this.y - 5, 16, 5);
+          ctx.fillRect(x - coneWidth / 3, this.y - 5 * scale, coneWidth * 0.66, 5 * scale);
         }
         ctx.restore();
       }
@@ -1651,7 +1716,7 @@
         this.speed = level3Params.roadSpeed * 0.7; // slower than road
         this.wobbleTimer = 0;
         this.targetLane = this.lane;
-        this.x = getLaneX(this.lane);
+        this.laneProgress = this.lane; // Fractional lane position for smooth transitions
       }
       update(deltaSec) {
         this.y += this.speed * speedMultiplier * drivingSpeed * deltaSec;
@@ -1665,38 +1730,49 @@
           }
         }
 
-        // Smooth lane transition
-        const targetX = getLaneX(this.targetLane);
-        this.x += (targetX - this.x) * 3 * deltaSec;
-        if (Math.abs(this.x - targetX) < 5) this.lane = this.targetLane;
+        // Smooth lane transition using fractional lane position
+        this.laneProgress += (this.targetLane - this.laneProgress) * 3 * deltaSec;
+        if (Math.abs(this.laneProgress - this.targetLane) < 0.05) this.lane = this.targetLane;
 
         return this.y < canvas.height + 100;
       }
       draw() {
+        // Get perspective-correct position and scale using fractional lane
+        const persp = getPerspective(this.laneProgress, this.y);
+        const x = persp.x;
+        const scale = persp.scale;
+
         ctx.save();
-        // Car body
+        // Car body with perspective scaling
+        const carWidth = 36 * scale;
+        const carHeight = 60 * scale;
         ctx.shadowColor = '#ff3366';
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 15 * scale;
         ctx.fillStyle = '#cc2255';
-        ctx.fillRect(this.x - 18, this.y - 30, 36, 60);
+        ctx.fillRect(x - carWidth / 2, this.y - carHeight / 2, carWidth, carHeight);
 
         // Windshield
+        const windshieldWidth = 24 * scale;
+        const windshieldHeight = 18 * scale;
         ctx.fillStyle = '#333355';
-        ctx.fillRect(this.x - 12, this.y - 20, 24, 18);
+        ctx.fillRect(x - windshieldWidth / 2, this.y - carHeight / 3, windshieldWidth, windshieldHeight);
 
         // Rear lights
+        const lightWidth = 8 * scale;
+        const lightHeight = 6 * scale;
         ctx.fillStyle = '#ff0000';
         ctx.shadowColor = '#ff0000';
-        ctx.shadowBlur = 8;
-        ctx.fillRect(this.x - 16, this.y + 22, 8, 6);
-        ctx.fillRect(this.x + 8, this.y + 22, 8, 6);
+        ctx.shadowBlur = 8 * scale;
+        ctx.fillRect(x - carWidth / 2 + 2 * scale, this.y + carHeight / 3, lightWidth, lightHeight);
+        ctx.fillRect(x + carWidth / 2 - lightWidth - 2 * scale, this.y + carHeight / 3, lightWidth, lightHeight);
         ctx.restore();
       }
       checkCollision(playerLane, playerY) {
-        const playerX = getLaneX(playerLane);
-        const dx = Math.abs(this.x - playerX);
+        const persp = getPerspective(this.laneProgress, this.y);
+        const playerPersp = getPerspective(playerLane, playerY);
+        const dx = Math.abs(persp.x - playerPersp.x);
         const dy = Math.abs(this.y - playerY);
-        return dx < 35 && dy < 45;
+        return dx < 35 * persp.scale && dy < 45;
       }
     }
 
