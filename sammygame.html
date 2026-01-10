@@ -1616,22 +1616,28 @@
     class DrivingBullet {
       constructor(lane) {
         this.lane = lane;
-        this.x = getLaneX(lane);
         this.y = canvas.height - 100;
         this.speed = 600;
         this.r = 6;
       }
       update(deltaSec) {
         this.y -= this.speed * deltaSec;
-        return this.y > -20;
+        const horizonY = canvas.height * 0.25;
+        return this.y > horizonY - 20; // Stop at horizon
       }
       draw() {
+        // Use perspective to get correct X position and scale
+        const persp = getPerspective(this.lane, this.y);
+        const x = persp.x;
+        const scale = persp.scale;
+
         ctx.save();
         ctx.fillStyle = '#00ffff';
         ctx.shadowColor = '#00ffff';
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 15 * scale;
         ctx.beginPath();
-        ctx.ellipse(this.x, this.y, 4, 10, 0, 0, Math.PI * 2);
+        // Scale bullet size based on perspective
+        ctx.ellipse(x, this.y, 4 * scale, 10 * scale, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }
@@ -1640,9 +1646,12 @@
         return Math.abs(this.y - targetY) < 30;
       }
       checkHitBoss(boss) {
-        const dx = Math.abs(this.x - boss.x);
+        // Use perspective-correct X positions for collision
+        const bulletPersp = getPerspective(this.lane, this.y);
+        const bossPersp = getPerspective(boss.lane, boss.y);
+        const dx = Math.abs(bulletPersp.x - bossPersp.x);
         const dy = Math.abs(this.y - boss.y);
-        return dx < 40 && dy < 45;
+        return dx < 40 * bulletPersp.scale && dy < 45;
       }
     }
 
@@ -1780,8 +1789,9 @@
       constructor() {
         this.cfg = bossConfigs[3];
         this.lane = 1;
-        this.x = getLaneX(1);
-        this.y = canvas.height * 0.3;
+        this.laneProgress = 1; // Fractional lane for smooth transitions
+        this.y = canvas.height * 0.35;
+        this.baseY = canvas.height * 0.35;
         this.maxHp = this.cfg.hp;
         this.hp = this.cfg.hp;
         this.width = 45;
@@ -1817,43 +1827,53 @@
           this.y += 300 * deltaSec;
           if (this.chargeTimer <= 0) {
             this.isCharging = false;
-            this.y = canvas.height * 0.3;
+            this.y = this.baseY;
           }
         }
 
-        // Smooth movement to target lane
-        const targetX = getLaneX(this.lane);
-        this.x += (targetX - this.x) * 5 * deltaSec;
+        // Smooth lane transition
+        this.laneProgress += (this.lane - this.laneProgress) * 5 * deltaSec;
       }
       draw() {
+        // Get perspective-correct position and scale
+        const persp = getPerspective(this.laneProgress, this.y);
+        const x = persp.x;
+        const scale = persp.scale;
+
         ctx.save();
 
-        // Police car body
+        // Police car body with perspective scaling
+        const carWidth = 44 * scale;
+        const carHeight = 70 * scale;
         ctx.shadowColor = '#4444ff';
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = 20 * scale;
         ctx.fillStyle = '#222244';
-        ctx.fillRect(this.x - 22, this.y - 35, 44, 70);
+        ctx.fillRect(x - carWidth / 2, this.y - carHeight / 2, carWidth, carHeight);
 
         // White stripe
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(this.x - 22, this.y - 10, 44, 8);
+        ctx.fillRect(x - carWidth / 2, this.y - 4 * scale, carWidth, 8 * scale);
 
         // Windshield
+        const windshieldWidth = 32 * scale;
+        const windshieldHeight = 20 * scale;
         ctx.fillStyle = '#111122';
-        ctx.fillRect(this.x - 16, this.y - 25, 32, 20);
+        ctx.fillRect(x - windshieldWidth / 2, this.y - carHeight / 3, windshieldWidth, windshieldHeight);
 
         // Siren lights (alternating)
+        const sirenWidth = 14 * scale;
+        const sirenHeight = 8 * scale;
         const sirenColor1 = Math.sin(this.sirenPhase) > 0 ? '#ff0000' : '#440000';
         const sirenColor2 = Math.sin(this.sirenPhase) > 0 ? '#440044' : '#0000ff';
         ctx.fillStyle = sirenColor1;
         ctx.shadowColor = sirenColor1;
-        ctx.shadowBlur = 15;
-        ctx.fillRect(this.x - 18, this.y - 40, 14, 8);
+        ctx.shadowBlur = 15 * scale;
+        ctx.fillRect(x - carWidth / 2 + 4 * scale, this.y - carHeight / 2 - sirenHeight, sirenWidth, sirenHeight);
         ctx.fillStyle = sirenColor2;
         ctx.shadowColor = sirenColor2;
-        ctx.fillRect(this.x + 4, this.y - 40, 14, 8);
+        ctx.fillRect(x + carWidth / 2 - sirenWidth - 4 * scale, this.y - carHeight / 2 - sirenHeight, sirenWidth, sirenHeight);
 
-        // Boss health bar
+        // Boss health bar (fixed position, not scaled)
         const barW = 200, barH = 10, barX = canvas.width / 2 - barW / 2, barY = 20;
         ctx.shadowBlur = 0;
         ctx.strokeStyle = this.cfg.bar;
@@ -1865,23 +1885,26 @@
 
         // "POLICE" text
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px "Courier New", monospace';
+        ctx.font = `bold ${Math.max(8, Math.floor(10 * scale))}px "Courier New", monospace`;
         ctx.textAlign = 'center';
-        ctx.fillText('POLICE', this.x, this.y + 5);
+        ctx.fillText('POLICE', x, this.y + 5 * scale);
 
         ctx.restore();
       }
       checkPlayerCollision(playerLane, playerY) {
-        const playerX = getLaneX(playerLane);
-        const dx = Math.abs(this.x - playerX);
+        const bossPersp = getPerspective(this.laneProgress, this.y);
+        const playerPersp = getPerspective(playerLane, playerY);
+        const dx = Math.abs(bossPersp.x - playerPersp.x);
         const dy = Math.abs(this.y - playerY);
-        return dx < 40 && dy < 50;
+        return dx < 40 * bossPersp.scale && dy < 50;
       }
       checkObstacleHit(obstacle) {
         if (this.invulnerable > 0) return false;
-        const dx = Math.abs(getLaneX(obstacle.lane) - this.x);
+        const bossPersp = getPerspective(this.laneProgress, this.y);
+        const obstaclePersp = getPerspective(obstacle.lane, obstacle.y);
+        const dx = Math.abs(obstaclePersp.x - bossPersp.x);
         const dy = Math.abs(obstacle.y - this.y);
-        if (dx < 35 && dy < 40) {
+        if (dx < 35 * bossPersp.scale && dy < 40) {
           this.hp--;
           this.invulnerable = 0.5;
           return true;
